@@ -775,6 +775,14 @@ flake8 src/ tests/
 mypy src/
 ```
 
+## Running Tests
+
+The project uses [pytest](https://pytest.org) for its test suite. After installing the dependencies, run:
+
+```bash
+pytest
+```
+
 ## Docker Deployment
 
 ### Building Container

@@ -382,7 +382,7 @@ class CompetitorAnalyzer:
         # Funding momentum (recent large rounds = higher threat)
         if profile.funding_info and profile.funding_info.last_round_amount:
             try:
-                amount = profile.funding_info.last_round_amount.replace(', '').replace('M', '').replace('B', '000')
+                amount = profile.funding_info.last_round_amount.replace(',', '').replace('M', '').replace('B', '000')
                 if float(amount) > 100:  # $100M+ round
                     score += 0.3
                 elif float(amount) > 50:  # $50M+ round

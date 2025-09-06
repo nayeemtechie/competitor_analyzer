@@ -1,4 +1,4 @@
-# main_competitor.py
+# src/main_competitor.py
 """
 Command-line interface for the competitor analysis system
 """
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 
 # Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from competitor.analyzer import CompetitorAnalyzer, run_competitor_analysis
 from competitor.config import CompetitorConfig
@@ -39,22 +39,22 @@ def create_parser() -> argparse.ArgumentParser:
         epilog="""
 Examples:
   # Analyze all configured competitors
-  python main_competitor.py
+  python src/main_competitor.py
 
   # Analyze specific competitors
-  python main_competitor.py --competitors "Algolia" "Constructor.io"
+  python src/main_competitor.py --competitors "Algolia" "Constructor.io"
 
   # Generate PDF report with comprehensive analysis
-  python main_competitor.py --format pdf --depth comprehensive
+  python src/main_competitor.py --format pdf --depth comprehensive
 
   # Quick analysis with JSON output
-  python main_competitor.py --format json --depth basic
+  python src/main_competitor.py --format json --depth basic
 
   # Validate configuration
-  python main_competitor.py --validate-config
+  python src/main_competitor.py --validate-config
 
   # List configured competitors
-  python main_competitor.py --list-competitors
+  python src/main_competitor.py --list-competitors
         """
     )
     
@@ -186,11 +186,7 @@ def validate_configuration(config_path: str) -> bool:
         return True
         
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
-        sys.exit(1)
-
-if __name__ == '__main__':
-    main() Configuration validation failed: {e}")
+        print(f"❌ Configuration validation failed: {e}")
         return False
 
 def list_competitors(config_path: str) -> None:
@@ -364,4 +360,8 @@ def main():
         print("\n❌ Interrupted by user")
         sys.exit(1)
     except Exception as e:
-        print(f"❌
+        print(f"❌ Unexpected error: {e}")
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()

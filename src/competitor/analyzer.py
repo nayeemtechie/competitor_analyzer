@@ -19,27 +19,6 @@ from src.llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-# src/competitor/analyzer.py
-"""
-Main competitor analysis orchestrator
-"""
-
-import asyncio
-import logging
-from datetime import datetime
-from typing import List, Dict, Any, Optional
-from pathlib import Path
-
-from .config import CompetitorConfig
-from .models import CompetitorProfile, CompetitorIntelligence, ThreatLevel
-from .scraper import CompetitorScraper
-from .collectors import CollectorManager
-from .analysis import AnalysisEngine
-from .reports import ReportGenerator
-from src.llm.provider import LLMProvider
-
-logger = logging.getLogger(__name__)
-
 class CompetitorAnalyzer:
     """Main orchestrator for competitor analysis"""
     
@@ -378,19 +357,16 @@ class CompetitorAnalyzer:
     def _calculate_threat_score(self, profile: CompetitorProfile) -> float:
         """Calculate numerical threat score (0.0 to 1.0)"""
         score = 0.0
-        
+
         # Funding momentum (recent large rounds = higher threat)
         if profile.funding_info and profile.funding_info.last_round_amount:
-            try:
-                amount = profile.funding_info.last_round_amount.replace(',', '').replace('M', '').replace('B', '000')
-                if float(amount) > 100:  # $100M+ round
-                    score += 0.3
-                elif float(amount) > 50:  # $50M+ round
-                    score += 0.2
-                elif float(amount) > 10:  # $10M+ round
-                    score += 0.1
-            except:
-                pass
+            amount = self._normalize_funding_amount(profile.funding_info.last_round_amount)
+            if amount > 100:  # $100M+ round
+                score += 0.3
+            elif amount > 50:  # $50M+ round
+                score += 0.2
+            elif amount > 10:  # $10M+ round
+                score += 0.1
         
         # Market segment overlap
         if profile.target_markets:
@@ -412,8 +388,27 @@ class CompetitorAnalyzer:
         
         if profile.job_postings and len(profile.job_postings) > 20:
             score += 0.1
-        
+
         return min(score, 1.0)  # Cap at 1.0
+
+    @staticmethod
+    def _normalize_funding_amount(amount_str: str) -> float:
+        """Convert funding strings like '1.2B' or '300M' to float millions"""
+        if not amount_str:
+            return 0.0
+
+        cleaned = amount_str.replace(',', '').strip().upper()
+        multiplier = 1.0
+        if cleaned.endswith('B'):
+            multiplier = 1000.0
+            cleaned = cleaned[:-1]
+        elif cleaned.endswith('M'):
+            multiplier = 1.0
+            cleaned = cleaned[:-1]
+        try:
+            return float(cleaned) * multiplier
+        except ValueError:
+            return 0.0
     
     async def generate_executive_summary(self, intelligence: CompetitorIntelligence) -> str:
         """Generate executive summary of competitive landscape"""

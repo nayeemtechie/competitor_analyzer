@@ -24,3 +24,13 @@ def test_calculate_threat_score():
     profile = make_profile()
     score = analyzer._calculate_threat_score(profile)
     assert score == 1.0
+
+
+def test_normalize_funding_amount_millions():
+    analyzer = CompetitorAnalyzer
+    assert analyzer._normalize_funding_amount('300M') == 300.0
+
+
+def test_normalize_funding_amount_billions():
+    analyzer = CompetitorAnalyzer
+    assert analyzer._normalize_funding_amount('1.2B') == 1200.0

@@ -1,0 +1,4 @@
+# Placeholder dependencies
+PyYAML
+pytest
+requests

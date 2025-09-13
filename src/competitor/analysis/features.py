@@ -1254,7 +1254,8 @@ class ThreatAnalyzer:
                 score += 0.4
             elif 'M' in funding_str:
                 try:
-                    amount = float(funding_str.replace(', '').replace('M', '').replace(',', ''))
+                    #amount = float(funding_str.replace(', '').replace('M', '').replace(',', ''))
+                    amount = float(funding_str.replace(',', '').replace('M', ''))
                     if amount > 500:
                         score += 0.35
                     elif amount > 200:

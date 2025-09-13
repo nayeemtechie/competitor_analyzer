@@ -360,7 +360,7 @@ class CompetitorScraper:
     def _detect_currency(self, soup: BeautifulSoup) -> Optional[str]:
         """Detect currency used in pricing"""
         text = soup.get_text()
-        if ' in text:
+        if '$' in text:
             return 'USD'
         elif '€' in text:
             return 'EUR'

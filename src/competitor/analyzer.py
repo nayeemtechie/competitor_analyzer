@@ -5,7 +5,7 @@ Main competitor analysis orchestrator
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta  # Added timedelta import
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
@@ -15,7 +15,7 @@ from .scraper import CompetitorScraper
 from .collectors import CollectorManager
 from .analysis import AnalysisEngine
 from .reports import ReportGenerator
-from  llm.provider import LLMProvider
+from ..llm.provider import LLMProvider  # Fixed import path
 
 logger = logging.getLogger(__name__)
 
@@ -266,8 +266,17 @@ class CompetitorAnalyzer:
             import json
             from dataclasses import asdict
             
+            # Convert to dict for JSON serialization
+            profile_dict = asdict(profile)
+            
+            # Convert enums to their values for JSON serialization
+            def enum_serializer(obj):
+                if hasattr(obj, 'value'):
+                    return obj.value
+                return obj
+            
             with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(asdict(profile), f, indent=2, default=str)
+                json.dump(profile_dict, f, indent=2, default=enum_serializer, ensure_ascii=False)
             
             logger.debug(f"Saved individual profile: {filepath}")
             
@@ -360,13 +369,16 @@ class CompetitorAnalyzer:
 
         # Funding momentum (recent large rounds = higher threat)
         if profile.funding_info and profile.funding_info.last_round_amount:
-            amount = self._normalize_funding_amount(profile.funding_info.last_round_amount)
-            if amount > 100:  # $100M+ round
-                score += 0.3
-            elif amount > 50:  # $50M+ round
-                score += 0.2
-            elif amount > 10:  # $10M+ round
-                score += 0.1
+            try:
+                amount = self._normalize_funding_amount(profile.funding_info.last_round_amount)
+                if amount > 100:  # $100M+ round
+                    score += 0.3
+                elif amount > 50:  # $50M+ round
+                    score += 0.2
+                elif amount > 10:  # $10M+ round
+                    score += 0.1
+            except Exception:
+                pass
         
         # Market segment overlap
         if profile.target_markets:
@@ -397,17 +409,22 @@ class CompetitorAnalyzer:
         if not amount_str:
             return 0.0
 
-        cleaned = amount_str.replace(',', '').strip().upper()
-        multiplier = 1.0
-        if cleaned.endswith('B'):
-            multiplier = 1000.0
-            cleaned = cleaned[:-1]
-        elif cleaned.endswith('M'):
-            multiplier = 1.0
-            cleaned = cleaned[:-1]
         try:
+            cleaned = amount_str.replace(',', '').strip().upper()
+            multiplier = 1.0
+            
+            if cleaned.endswith('B'):
+                multiplier = 1000.0
+                cleaned = cleaned[:-1]
+            elif cleaned.endswith('M'):
+                multiplier = 1.0
+                cleaned = cleaned[:-1]
+            
+            # Remove currency symbols
+            cleaned = cleaned.replace(', '').replace('€', '').replace('£', '')
+            
             return float(cleaned) * multiplier
-        except ValueError:
+        except (ValueError, AttributeError):
             return 0.0
     
     async def generate_executive_summary(self, intelligence: CompetitorIntelligence) -> str:

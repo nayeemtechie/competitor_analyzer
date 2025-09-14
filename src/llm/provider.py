@@ -12,7 +12,7 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-class LLMProvider(Enum):
+class LLMProviderType(Enum):
     """Supported LLM providers"""
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
@@ -40,38 +40,44 @@ class LLMProviderManager:
         # OpenAI
         if os.getenv('OPENAI_API_KEY'):
             try:
-                import openai
-                self.providers[LLMProvider.OPENAI] = OpenAIProvider()
+                self.providers[LLMProviderType.OPENAI] = OpenAIProvider()
                 if not self.default_provider:
-                    self.default_provider = LLMProvider.OPENAI
+                    self.default_provider = LLMProviderType.OPENAI
                 logger.info("OpenAI provider initialized")
             except ImportError:
-                logger.warning("OpenAI library not available")
+                logger.warning("OpenAI library not available. Install with: pip install openai")
         
         # Anthropic
         if os.getenv('ANTHROPIC_API_KEY'):
             try:
-                import anthropic
-                self.providers[LLMProvider.ANTHROPIC] = AnthropicProvider()
+                self.providers[LLMProviderType.ANTHROPIC] = AnthropicProvider()
                 if not self.default_provider:
-                    self.default_provider = LLMProvider.ANTHROPIC
+                    self.default_provider = LLMProviderType.ANTHROPIC
                 logger.info("Anthropic provider initialized")
             except ImportError:
-                logger.warning("Anthropic library not available")
+                logger.warning("Anthropic library not available. Install with: pip install anthropic")
         
         # Perplexity
         if os.getenv('PERPLEXITY_API_KEY'):
-            self.providers[LLMProvider.PERPLEXITY] = PerplexityProvider()
-            logger.info("Perplexity provider initialized")
+            try:
+                self.providers[LLMProviderType.PERPLEXITY] = PerplexityProvider()
+                logger.info("Perplexity provider initialized")
+            except ImportError:
+                logger.warning("OpenAI library needed for Perplexity. Install with: pip install openai")
         
         if not self.providers:
-            raise RuntimeError("No LLM providers available. Set API keys for OpenAI, Anthropic, or Perplexity.")
+            raise RuntimeError(
+                "No LLM providers available. Install required packages and set API keys:\n"
+                "- OpenAI: pip install openai && export OPENAI_API_KEY=your_key\n"
+                "- Anthropic: pip install anthropic && export ANTHROPIC_API_KEY=your_key\n"
+                "- Perplexity: pip install openai && export PERPLEXITY_API_KEY=your_key"
+            )
     
     async def chat(self, 
                    system: str,
                    user: str,
                    model: str = "gpt-4o",
-                   provider: Optional[LLMProvider] = None,
+                   provider: Optional[LLMProviderType] = None,
                    temperature: float = 0.3,
                    max_tokens: int = 4000) -> str:
         """Send chat completion request with fallback support"""
@@ -119,23 +125,24 @@ class LLMProviderManager:
             
             raise RuntimeError(f"All LLM providers failed. Last error: {e}")
     
-    def _get_provider_for_model(self, model: str) -> LLMProvider:
+    def _get_provider_for_model(self, model: str) -> LLMProviderType:
         """Determine provider based on model name"""
-        if model.startswith(('gpt-', 'o1-')):
-            return LLMProvider.OPENAI
-        elif model.startswith(('claude-', 'sonnet', 'opus', 'haiku')):
-            return LLMProvider.ANTHROPIC
-        elif model.startswith('sonar'):
-            return LLMProvider.PERPLEXITY
+        model_lower = model.lower()
+        if model_lower.startswith(('gpt-', 'o1-')):
+            return LLMProviderType.OPENAI
+        elif model_lower.startswith(('claude-', 'sonnet', 'opus', 'haiku')):
+            return LLMProviderType.ANTHROPIC
+        elif model_lower.startswith('sonar'):
+            return LLMProviderType.PERPLEXITY
         else:
-            return self.default_provider
+            return self.default_provider or LLMProviderType.OPENAI
     
-    def _get_fallback_model(self, provider: LLMProvider) -> str:
+    def _get_fallback_model(self, provider: LLMProviderType) -> str:
         """Get fallback model for provider"""
         fallback_models = {
-            LLMProvider.OPENAI: "gpt-4o-mini",
-            LLMProvider.ANTHROPIC: "claude-3-haiku-20240307",
-            LLMProvider.PERPLEXITY: "sonar-small-online"
+            LLMProviderType.OPENAI: "gpt-4o-mini",
+            LLMProviderType.ANTHROPIC: "claude-3-haiku-20240307",
+            LLMProviderType.PERPLEXITY: "sonar-small-online"
         }
         return fallback_models.get(provider, "gpt-4o-mini")
 
@@ -143,10 +150,13 @@ class OpenAIProvider:
     """OpenAI provider implementation"""
     
     def __init__(self):
-        import openai
-        self.client = openai.AsyncOpenAI(
-            api_key=os.getenv('OPENAI_API_KEY')
-        )
+        try:
+            import openai
+            self.client = openai.AsyncOpenAI(
+                api_key=os.getenv('OPENAI_API_KEY')
+            )
+        except ImportError:
+            raise ImportError("OpenAI library not installed. Run: pip install openai")
     
     async def chat(self, system: str, user: str, model: str = "gpt-4o", 
                    temperature: float = 0.3, max_tokens: int = 4000) -> LLMResponse:
@@ -179,12 +189,15 @@ class AnthropicProvider:
     """Anthropic provider implementation"""
     
     def __init__(self):
-        import anthropic
-        self.client = anthropic.AsyncAnthropic(
-            api_key=os.getenv('ANTHROPIC_API_KEY')
-        )
+        try:
+            import anthropic
+            self.client = anthropic.AsyncAnthropic(
+                api_key=os.getenv('ANTHROPIC_API_KEY')
+            )
+        except ImportError:
+            raise ImportError("Anthropic library not installed. Run: pip install anthropic")
     
-    async def chat(self, system: str, user: str, model: str = "claude-3-sonnet-20240229",
+    async def chat(self, system: str, user: str, model: str = "claude-3-5-sonnet-20241022",
                    temperature: float = 0.3, max_tokens: int = 4000) -> LLMResponse:
         """Send message to Anthropic"""
         try:
@@ -211,11 +224,14 @@ class PerplexityProvider:
     """Perplexity provider implementation"""
     
     def __init__(self):
-        import openai
-        self.client = openai.AsyncOpenAI(
-            api_key=os.getenv('PERPLEXITY_API_KEY'),
-            base_url="https://api.perplexity.ai"
-        )
+        try:
+            import openai
+            self.client = openai.AsyncOpenAI(
+                api_key=os.getenv('PERPLEXITY_API_KEY'),
+                base_url="https://api.perplexity.ai"
+            )
+        except ImportError:
+            raise ImportError("OpenAI library needed for Perplexity. Run: pip install openai")
     
     async def chat(self, system: str, user: str, model: str = "sonar-pro",
                    temperature: float = 0.3, max_tokens: int = 4000) -> LLMResponse:

@@ -5,7 +5,7 @@ Data models and schemas for competitor analysis
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
-from datetime import datetime
+from datetime import datetime, timedelta  # Added missing timedelta import
 from enum import Enum
 
 class ThreatLevel(Enum):
@@ -35,6 +35,7 @@ class PricingTier:
     features: List[str] = field(default_factory=list)
     target_segment: Optional[str] = None
     billing_period: Optional[str] = None
+    popular: bool = False
 
 @dataclass
 class CaseStudy:
@@ -237,10 +238,12 @@ class CompetitorIntelligence:
             for news in profile.recent_news:
                 if news.date:
                     try:
-                        news_date = datetime.fromisoformat(news.date.replace('Z', '+00:00'))
+                        # More robust date parsing
+                        from dateutil import parser as date_parser
+                        news_date = date_parser.parse(news.date)
                         if news_date >= cutoff_date:
                             recent_news.append(news)
-                    except:
+                    except Exception:
                         continue
         
         return sorted(recent_news, key=lambda x: x.date or '', reverse=True)
@@ -253,10 +256,17 @@ class CompetitorIntelligence:
         for profile in self.profiles:
             if profile.funding_info and profile.funding_info.total_funding:
                 try:
-                    # Simple parsing - would need more robust implementation
-                    amount_str = profile.funding_info.total_funding.replace('$', '').replace('M', '000000').replace('B', '000000000')
-                    total_funding += float(amount_str)
-                except:
+                    # More robust funding parsing
+                    funding_str = profile.funding_info.total_funding.upper()
+                    amount_str = funding_str.replace('$', '').replace(',', '')
+                    
+                    if 'B' in amount_str:
+                        amount = float(amount_str.replace('B', '')) * 1000  # Convert to millions
+                        total_funding += amount
+                    elif 'M' in amount_str:
+                        amount = float(amount_str.replace('M', ''))
+                        total_funding += amount
+                except (ValueError, AttributeError):
                     pass
             
             if profile.funding_info and profile.funding_info.last_round_date:
@@ -268,6 +278,6 @@ class CompetitorIntelligence:
                 })
         
         return {
-            'total_market_funding': total_funding,
+            'total_market_funding': f"${total_funding:.1f}M",
             'recent_rounds': sorted(recent_rounds, key=lambda x: x['date'] or '', reverse=True)[:10]
         }

@@ -1,4 +1,36 @@
-# Placeholder dependencies
-PyYAML
-pytest
-requests
+# Core dependencies
+aiohttp>=3.9.0
+asyncio-throttle>=1.0.2
+beautifulsoup4>=4.12.0
+pyyaml>=6.0
+
+# LLM providers
+openai>=1.0.0
+anthropic>=0.7.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+python-dateutil>=2.8.0
+
+# Web scraping
+requests>=2.31.0
+urllib3>=2.0.0
+
+# Report generation
+reportlab>=4.0.0
+python-docx>=1.1.0
+
+# Optional enhanced features
+crunchbase-api>=0.1.0  # For funding data
+PyGithub>=1.59.0       # For GitHub API
+python-twitter>=3.5    # For Twitter API
+
+# Development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+flake8>=6.0.0
+
+# Logging and monitoring
+structlog>=23.2.0

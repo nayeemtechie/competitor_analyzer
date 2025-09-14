@@ -5,7 +5,7 @@ Data models and schemas for competitor analysis
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta  # Added missing timedelta import
+from datetime import datetime, timedelta
 from enum import Enum
 
 class ThreatLevel(Enum):

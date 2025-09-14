@@ -1,325 +1,574 @@
 # src/competitor/config.py
 """
-Configuration management for competitor analysis
+Configuration management system for the competitor analysis application.
+Handles YAML configuration loading, validation, and environment variable integration.
 """
 
 import os
 import yaml
+from typing import Dict, Any, List, Optional, Union
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Any, Optional
-from .models import AnalysisConfig, AnalysisDepth
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LLMConfig:
+    """LLM provider configuration."""
+    provider: str = "openai"
+    models: Dict[str, str] = field(default_factory=lambda: {
+        "analysis": "gpt-4o",
+        "summary": "gpt-4o-mini",
+        "comparison": "gpt-4o"
+    })
+    temperature: float = 0.3
+    max_tokens: int = 4000
+    fallback_model: str = "gpt-4o-mini"
+
+
+@dataclass
+class CompetitorInfo:
+    """Individual competitor configuration."""
+    name: str
+    website: str
+    focus_areas: List[str] = field(default_factory=list)
+    priority: str = "medium"  # low, medium, high
+    market_segment: List[str] = field(default_factory=list)
+    competitive_threat: str = "medium"  # low, medium, high, critical
+    last_analyzed: Optional[datetime] = None
+
+
+@dataclass
+class ScrapingConfig:
+    """Web scraping configuration."""
+    delay_between_requests: float = 2.0
+    max_pages_per_site: int = 50
+    timeout: int = 30
+    concurrent_requests: int = 3
+    rate_limit: float = 1.0
+    user_agent: str = "CompetitorAnalysis Bot 1.0"
+    respect_robots_txt: bool = True
+    target_pages: List[Dict[str, str]] = field(default_factory=lambda: [
+        {"path": "/", "name": "homepage", "priority": "high"},
+        {"path": "/pricing", "name": "pricing", "priority": "high"},
+        {"path": "/products", "name": "products", "priority": "high"}
+    ])
+
+
+@dataclass
+class DataSourceConfig:
+    """Data source configuration."""
+    company_websites: bool = True
+    funding_data: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": True,
+        "sources": ["crunchbase"],
+        "cache_ttl_hours": 168
+    })
+    job_boards: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": True,
+        "sources": ["linkedin", "glassdoor", "indeed"],
+        "max_jobs_per_company": 20,
+        "focus_departments": ["engineering", "product", "sales"]
+    })
+    news_sources: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": True,
+        "sources": ["techcrunch", "venturebeat", "searchengineland"],
+        "days_back": 90
+    })
+    social_media: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": True,
+        "platforms": ["linkedin", "twitter", "github", "youtube"]
+    })
+    github_repos: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": True,
+        "analyze_public_repos": True,
+        "track_contributions": True,
+        "language_analysis": True
+    })
+    patent_databases: Dict[str, Any] = field(default_factory=lambda: {
+        "enabled": False,
+        "sources": ["google_patents"]
+    })
+
+
+@dataclass
+class OutputConfig:
+    """Output and reporting configuration."""
+    formats: List[str] = field(default_factory=lambda: ["pdf", "json"])
+    output_dir: str = "competitor_reports"
+    include_charts: bool = True
+    include_screenshots: bool = False
+    include_competitive_matrix: bool = True
+    include_swot_analysis: bool = True
+    pdf: Dict[str, Any] = field(default_factory=lambda: {
+        "brand_color": [52, 152, 219],
+        "include_executive_summary": True,
+        "include_detailed_profiles": True,
+        "include_appendix": True,
+        "logo_path": None
+    })
+    json: Dict[str, Any] = field(default_factory=lambda: {
+        "pretty_print": True,
+        "include_raw_data": False
+    })
+
 
 class CompetitorConfig:
-    """Manages configuration for competitor analysis"""
+    """Main configuration management class."""
     
     def __init__(self, config_path: str = "competitor_config.yaml"):
+        """
+        Initialize configuration manager.
+        
+        Args:
+            config_path: Path to the YAML configuration file
+        """
         self.config_path = Path(config_path)
-        self._config_data = None
-        self.load_config()
+        self._raw_config: Dict[str, Any] = {}
+        self._competitors: List[CompetitorInfo] = []
+        
+        # Initialize configuration components
+        self.llm: LLMConfig = LLMConfig()
+        self.scraping: ScrapingConfig = ScrapingConfig()
+        self.data_sources: DataSourceConfig = DataSourceConfig()
+        self.output: OutputConfig = OutputConfig()
+        self.analysis: Dict[str, str] = {"depth_level": "standard"}
+        
+        # Load configuration if file exists
+        if self.config_path.exists():
+            self.load_config()
+        else:
+            logger.warning(f"Configuration file {config_path} not found. Using defaults.")
+            self._create_default_config()
     
     def load_config(self) -> None:
-        """Load configuration from YAML file"""
-        if self.config_path.exists():
+        """Load configuration from YAML file."""
+        try:
             with open(self.config_path, 'r', encoding='utf-8') as file:
-                self._config_data = yaml.safe_load(file) or {}
-        else:
-            self._config_data = self.create_default_config()
-            self.save_config()
+                self._raw_config = yaml.safe_load(file) or {}
+            
+            self._parse_config()
+            self._load_environment_overrides()
+            self._validate_config()
+            
+            logger.info(f"Configuration loaded successfully from {self.config_path}")
+            
+        except yaml.YAMLError as e:
+            logger.error(f"Error parsing YAML configuration: {e}")
+            raise
+        except FileNotFoundError:
+            logger.error(f"Configuration file not found: {self.config_path}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error loading configuration: {e}")
+            raise
     
-    def save_config(self) -> None:
-        """Save current configuration to file"""
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.config_path, 'w', encoding='utf-8') as file:
-            yaml.dump(self._config_data, file, default_flow_style=False, sort_keys=False)
+    def _parse_config(self) -> None:
+        """Parse the raw configuration into structured objects."""
+        # Parse LLM configuration
+        if "llm" in self._raw_config:
+            llm_data = self._raw_config["llm"]
+            self.llm = LLMConfig(
+                provider=llm_data.get("provider", "openai"),
+                models=llm_data.get("models", self.llm.models),
+                temperature=llm_data.get("temperature", 0.3),
+                max_tokens=llm_data.get("max_tokens", 4000),
+                fallback_model=llm_data.get("fallback_model", "gpt-4o-mini")
+            )
+        
+        # Parse competitors
+        if "competitors" in self._raw_config:
+            self._competitors = []
+            for comp_data in self._raw_config["competitors"]:
+                competitor = CompetitorInfo(
+                    name=comp_data["name"],
+                    website=comp_data["website"],
+                    focus_areas=comp_data.get("focus_areas", []),
+                    priority=comp_data.get("priority", "medium"),
+                    market_segment=comp_data.get("market_segment", []),
+                    competitive_threat=comp_data.get("competitive_threat", "medium"),
+                    last_analyzed=comp_data.get("last_analyzed")
+                )
+                self._competitors.append(competitor)
+        
+        # Parse analysis configuration
+        if "analysis" in self._raw_config:
+            self.analysis = self._raw_config["analysis"]
+        
+        # Parse scraping configuration
+        if "scraping" in self._raw_config:
+            scraping_data = self._raw_config["scraping"]
+            self.scraping = ScrapingConfig(
+                delay_between_requests=scraping_data.get("delay_between_requests", 2.0),
+                max_pages_per_site=scraping_data.get("max_pages_per_site", 50),
+                timeout=scraping_data.get("timeout", 30),
+                concurrent_requests=scraping_data.get("concurrent_requests", 3),
+                rate_limit=scraping_data.get("rate_limit", 1.0),
+                user_agent=scraping_data.get("user_agent", "CompetitorAnalysis Bot 1.0"),
+                respect_robots_txt=scraping_data.get("respect_robots_txt", True),
+                target_pages=scraping_data.get("target_pages", self.scraping.target_pages)
+            )
+        
+        # Parse data sources configuration
+        if "data_sources" in self._raw_config:
+            ds_data = self._raw_config["data_sources"]
+            self.data_sources = DataSourceConfig(
+                company_websites=ds_data.get("company_websites", True),
+                funding_data=ds_data.get("funding_data", self.data_sources.funding_data),
+                job_boards=ds_data.get("job_boards", self.data_sources.job_boards),
+                news_sources=ds_data.get("news_sources", self.data_sources.news_sources),
+                social_media=ds_data.get("social_media", self.data_sources.social_media),
+                github_repos=ds_data.get("github_repos", self.data_sources.github_repos),
+                patent_databases=ds_data.get("patent_databases", self.data_sources.patent_databases)
+            )
+        
+        # Parse output configuration
+        if "output" in self._raw_config:
+            output_data = self._raw_config["output"]
+            self.output = OutputConfig(
+                formats=output_data.get("formats", ["pdf", "json"]),
+                output_dir=output_data.get("output_dir", "competitor_reports"),
+                include_charts=output_data.get("include_charts", True),
+                include_screenshots=output_data.get("include_screenshots", False),
+                include_competitive_matrix=output_data.get("include_competitive_matrix", True),
+                include_swot_analysis=output_data.get("include_swot_analysis", True),
+                pdf=output_data.get("pdf", self.output.pdf),
+                json=output_data.get("json", self.output.json)
+            )
     
-    def create_default_config(self) -> Dict[str, Any]:
-        """Create default configuration"""
-        return {
-            'llm': {
-                'provider': 'openai',
-                'models': {
-                    'analysis': 'gpt-4o',
-                    'summary': 'gpt-4o-mini',
-                    'comparison': 'sonar-pro'
-                },
-                'temperature': 0.3,
-                'max_tokens': 4000,
-                'fallback_model': 'gpt-4o-mini'
-            },
-            'competitors': [
-                {
-                    'name': 'Algolia',
-                    'website': 'https://www.algolia.com',
-                    'focus_areas': ['search', 'autocomplete', 'recommendations', 'analytics'],
-                    'priority': 'high',
-                    'market_segment': ['enterprise', 'mid-market'],
-                    'competitive_threat': 'high'
-                },
-                {
-                    'name': 'Constructor.io',
-                    'website': 'https://constructor.io',
-                    'focus_areas': ['product_search', 'browse', 'recommendations', 'quiz'],
-                    'priority': 'high',
-                    'market_segment': ['enterprise', 'mid-market'],
-                    'competitive_threat': 'high'
-                },
-                {
-                    'name': 'Bloomreach',
-                    'website': 'https://www.bloomreach.com',
-                    'focus_areas': ['discovery', 'content', 'personalization'],
-                    'priority': 'high',
-                    'market_segment': ['enterprise'],
-                    'competitive_threat': 'medium'
-                },
-                {
-                    'name': 'Elasticsearch',
-                    'website': 'https://www.elastic.co',
-                    'focus_areas': ['search', 'analytics', 'logging', 'security'],
-                    'priority': 'medium',
-                    'market_segment': ['enterprise', 'developer'],
-                    'competitive_threat': 'medium'
-                },
-                {
-                    'name': 'Coveo',
-                    'website': 'https://www.coveo.com',
-                    'focus_areas': ['search', 'recommendations', 'personalization', 'AI'],
-                    'priority': 'high',
-                    'market_segment': ['enterprise'],
-                    'competitive_threat': 'high'
-                }
-            ],
-            'analysis': {
-                'depth_level': 'standard',
-                'scraping': {
-                    'delay_between_requests': 2,
-                    'max_pages_per_site': 50,
-                    'timeout': 30,
-                    'concurrent_requests': 3,
-                    'rate_limit': 1.0,
-                    'user_agent': 'CompetitorAnalysis Bot 1.0',
-                    'respect_robots_txt': True
-                },
-                'target_pages': [
-                    {'path': '/', 'name': 'homepage', 'priority': 'high'},
-                    {'path': '/about', 'name': 'about', 'priority': 'medium'},
-                    {'path': '/products', 'name': 'products', 'priority': 'high'},
-                    {'path': '/pricing', 'name': 'pricing', 'priority': 'high'},
-                    {'path': '/customers', 'name': 'customers', 'priority': 'medium'},
-                    {'path': '/case-studies', 'name': 'case_studies', 'priority': 'high'},
-                    {'path': '/blog', 'name': 'blog', 'priority': 'medium'},
-                    {'path': '/careers', 'name': 'careers', 'priority': 'medium'},
-                    {'path': '/api', 'name': 'api_docs', 'priority': 'high'},
-                    {'path': '/documentation', 'name': 'documentation', 'priority': 'high'}
-                ]
-            },
-            'data_sources': {
-                'company_websites': True,
-                'job_boards': {
-                    'enabled': True,
-                    'sources': ['linkedin', 'glassdoor', 'indeed'],
-                    'max_jobs_per_company': 20,
-                    'focus_departments': ['engineering', 'product', 'sales', 'marketing']
-                },
-                'funding_data': {
-                    'enabled': True,
-                    'sources': ['crunchbase']
-                },
-                'social_media': {
-                    'enabled': True,
-                    'platforms': ['linkedin', 'twitter', 'github', 'youtube']
-                },
-                'github_repos': {
-                    'enabled': True,
-                    'analyze_public_repos': True,
-                    'track_contributions': True,
-                    'language_analysis': True
-                },
-                'news_sources': {
-                    'enabled': True,
-                    'sources': ['techcrunch', 'venturebeat', 'searchengineland'],
-                    'days_back': 90
-                },
-                'review_sites': {
-                    'enabled': True,
-                    'sources': ['g2', 'capterra', 'trustpilot']
-                }
-            },
-            'output': {
-                'formats': ['pdf', 'json'],
-                'output_dir': 'competitor_reports',
-                'include_charts': True,
-                'include_screenshots': False,
-                'include_competitive_matrix': True,
-                'include_swot_analysis': True,
-                'pdf': {
-                    'brand_color': [52, 152, 219],
-                    'include_executive_summary': True,
-                    'include_detailed_profiles': True,
-                    'include_appendix': True
-                },
-                'docx': {
-                    'template': None,
-                    'include_toc': True
-                },
-                'json': {
-                    'pretty_print': True,
-                    'include_raw_data': False
-                }
-            }
-        }
-    
-    @property
-    def competitors(self) -> List[Dict[str, Any]]:
-        """Get list of competitors to analyze"""
-        return self._config_data.get('competitors', [])
-    
-    @property
-    def llm_config(self) -> Dict[str, Any]:
-        """Get LLM configuration"""
-        return self._config_data.get('llm', {})
-    
-    @property
-    def analysis_config(self) -> Dict[str, Any]:
-        """Get analysis configuration"""
-        return self._config_data.get('analysis', {})
-    
-    @property
-    def data_sources_config(self) -> Dict[str, Any]:
-        """Get data sources configuration"""
-        return self._config_data.get('data_sources', {})
-    
-    @property
-    def output_config(self) -> Dict[str, Any]:
-        """Get output configuration"""
-        return self._config_data.get('output', {})
-    
-    def get_competitor_by_name(self, name: str) -> Optional[Dict[str, Any]]:
-        """Get competitor configuration by name"""
-        for competitor in self.competitors:
-            if competitor.get('name', '').lower() == name.lower():
-                return competitor
-        return None
-    
-    def get_high_priority_competitors(self) -> List[Dict[str, Any]]:
-        """Get competitors marked as high priority"""
-        return [c for c in self.competitors if c.get('priority') == 'high']
-    
-    def get_analysis_config_object(self) -> AnalysisConfig:
-        """Get analysis configuration as AnalysisConfig object"""
-        config_dict = {
-            'depth_level': self.analysis_config.get('depth_level', 'standard'),
-            'competitors': [c['name'] for c in self.competitors],
-            'output_formats': self.output_config.get('formats', ['pdf']),
-            'output_dir': self.output_config.get('output_dir', 'competitor_reports'),
-            'max_pages_per_site': self.analysis_config.get('scraping', {}).get('max_pages_per_site', 50),
-            'request_delay': self.analysis_config.get('scraping', {}).get('delay_between_requests', 2.0),
-            'timeout': self.analysis_config.get('scraping', {}).get('timeout', 30),
-            'concurrent_requests': self.analysis_config.get('scraping', {}).get('concurrent_requests', 3),
-            'analyze_website': self.data_sources_config.get('company_websites', True),
-            'analyze_funding': self.data_sources_config.get('funding_data', {}).get('enabled', True),
-            'analyze_jobs': self.data_sources_config.get('job_boards', {}).get('enabled', True),
-            'analyze_news': self.data_sources_config.get('news_sources', {}).get('enabled', True),
-            'analyze_social': self.data_sources_config.get('social_media', {}).get('enabled', True),
-            'analyze_github': self.data_sources_config.get('github_repos', {}).get('enabled', True),
-            'analyze_patents': self.data_sources_config.get('patent_databases', {}).get('enabled', False),
-            'news_days_back': self.data_sources_config.get('news_sources', {}).get('days_back', 90),
-            'jobs_days_back': 30
-        }
-        return AnalysisConfig.from_dict(config_dict)
-    
-    def add_competitor(self, name: str, website: str, **kwargs) -> None:
-        """Add a new competitor to the configuration"""
-        competitor = {
-            'name': name,
-            'website': website,
-            'focus_areas': kwargs.get('focus_areas', []),
-            'priority': kwargs.get('priority', 'medium'),
-            'market_segment': kwargs.get('market_segment', []),
-            'competitive_threat': kwargs.get('competitive_threat', 'medium'),
-            'last_analyzed': None
+    def _load_environment_overrides(self) -> None:
+        """Load environment variable overrides."""
+        # API Keys (handled by LLM provider)
+        env_overrides = {
+            "COMPETITOR_OUTPUT_DIR": "output.output_dir",
+            "COMPETITOR_RATE_LIMIT": "scraping.rate_limit",
+            "COMPETITOR_CACHE_ENABLED": "data_sources.cache_enabled"
         }
         
+        for env_var, config_path in env_overrides.items():
+            if env_var in os.environ:
+                value = os.environ[env_var]
+                # Apply the override (simplified implementation)
+                if env_var == "COMPETITOR_OUTPUT_DIR":
+                    self.output.output_dir = value
+                elif env_var == "COMPETITOR_RATE_LIMIT":
+                    self.scraping.rate_limit = float(value)
+    
+    def _validate_config(self) -> None:
+        """Validate configuration values."""
+        # Validate LLM provider
+        valid_providers = ["openai", "anthropic", "perplexity"]
+        if self.llm.provider not in valid_providers:
+            raise ValueError(f"Invalid LLM provider: {self.llm.provider}. Must be one of {valid_providers}")
+        
+        # Validate competitor data
+        if not self._competitors:
+            logger.warning("No competitors defined in configuration")
+        
+        # Validate output formats
+        valid_formats = ["pdf", "json", "docx"]
+        for fmt in self.output.formats:
+            if fmt not in valid_formats:
+                raise ValueError(f"Invalid output format: {fmt}. Must be one of {valid_formats}")
+        
+        # Validate scraping configuration
+        if self.scraping.rate_limit <= 0:
+            raise ValueError("Rate limit must be positive")
+        if self.scraping.concurrent_requests < 1:
+            raise ValueError("Concurrent requests must be at least 1")
+    
+    def _create_default_config(self) -> None:
+        """Create a default configuration file."""
+        default_config = {
+            "llm": {
+                "provider": "openai",
+                "models": {
+                    "analysis": "gpt-4o",
+                    "summary": "gpt-4o-mini",
+                    "comparison": "gpt-4o"
+                },
+                "temperature": 0.3,
+                "max_tokens": 4000,
+                "fallback_model": "gpt-4o-mini"
+            },
+            "competitors": [
+                {
+                    "name": "Example Competitor",
+                    "website": "https://example.com",
+                    "focus_areas": ["search", "ai"],
+                    "priority": "high",
+                    "market_segment": ["enterprise"],
+                    "competitive_threat": "medium"
+                }
+            ],
+            "analysis": {
+                "depth_level": "standard"
+            },
+            "scraping": {
+                "delay_between_requests": 2,
+                "max_pages_per_site": 50,
+                "timeout": 30,
+                "concurrent_requests": 3,
+                "rate_limit": 1.0,
+                "user_agent": "CompetitorAnalysis Bot 1.0",
+                "respect_robots_txt": True,
+                "target_pages": [
+                    {"path": "/", "name": "homepage", "priority": "high"},
+                    {"path": "/pricing", "name": "pricing", "priority": "high"},
+                    {"path": "/products", "name": "products", "priority": "high"}
+                ]
+            },
+            "data_sources": {
+                "company_websites": True,
+                "funding_data": {
+                    "enabled": True,
+                    "sources": ["crunchbase"],
+                    "cache_ttl_hours": 168
+                },
+                "job_boards": {
+                    "enabled": True,
+                    "sources": ["linkedin", "glassdoor"],
+                    "max_jobs_per_company": 20
+                },
+                "news_sources": {
+                    "enabled": True,
+                    "sources": ["techcrunch", "venturebeat"],
+                    "days_back": 90
+                }
+            },
+            "output": {
+                "formats": ["pdf", "json"],
+                "output_dir": "competitor_reports",
+                "include_charts": True,
+                "include_competitive_matrix": True,
+                "include_swot_analysis": True
+            }
+        }
+        
+        with open(self.config_path, 'w', encoding='utf-8') as file:
+            yaml.dump(default_config, file, default_flow_style=False, indent=2)
+        
+        logger.info(f"Created default configuration file: {self.config_path}")
+    
+    def add_competitor(self, name: str, website: str, **kwargs) -> None:
+        """
+        Add a new competitor to the configuration.
+        
+        Args:
+            name: Competitor name
+            website: Competitor website URL
+            **kwargs: Additional competitor attributes
+        """
         # Check if competitor already exists
         existing = self.get_competitor_by_name(name)
         if existing:
-            # Update existing competitor
-            existing.update(competitor)
-        else:
-            # Add new competitor
-            self._config_data['competitors'].append(competitor)
+            logger.warning(f"Competitor {name} already exists. Updating configuration.")
+            self.remove_competitor(name)
         
-        self.save_config()
+        competitor = CompetitorInfo(
+            name=name,
+            website=website,
+            focus_areas=kwargs.get("focus_areas", []),
+            priority=kwargs.get("priority", "medium"),
+            market_segment=kwargs.get("market_segment", []),
+            competitive_threat=kwargs.get("competitive_threat", "medium")
+        )
+        
+        self._competitors.append(competitor)
+        logger.info(f"Added competitor: {name}")
     
-    def update_competitor_analysis_date(self, name: str, date: str) -> None:
-        """Update the last analyzed date for a competitor"""
-        competitor = self.get_competitor_by_name(name)
-        if competitor:
-            competitor['last_analyzed'] = date
-            self.save_config()
+    def remove_competitor(self, name: str) -> bool:
+        """
+        Remove a competitor from the configuration.
+        
+        Args:
+            name: Competitor name to remove
+            
+        Returns:
+            True if competitor was removed, False if not found
+        """
+        for i, competitor in enumerate(self._competitors):
+            if competitor.name.lower() == name.lower():
+                del self._competitors[i]
+                logger.info(f"Removed competitor: {name}")
+                return True
+        
+        logger.warning(f"Competitor not found: {name}")
+        return False
     
-    def get_target_pages(self, priority_filter: Optional[str] = None) -> List[Dict[str, str]]:
-        """Get target pages to analyze, optionally filtered by priority"""
-        pages = self.analysis_config.get('target_pages', [])
-        if priority_filter:
-            pages = [p for p in pages if p.get('priority') == priority_filter]
-        return pages
+    def get_competitor_by_name(self, name: str) -> Optional[CompetitorInfo]:
+        """
+        Get competitor configuration by name.
+        
+        Args:
+            name: Competitor name
+            
+        Returns:
+            CompetitorInfo object or None if not found
+        """
+        for competitor in self._competitors:
+            if competitor.name.lower() == name.lower():
+                return competitor
+        return None
     
-    def get_llm_model(self, model_type: str) -> str:
-        """Get LLM model for specific type (analysis, summary, comparison)"""
-        models = self.llm_config.get('models', {})
-        return models.get(model_type, models.get('analysis', 'gpt-4o'))
+    def get_all_competitors(self) -> List[CompetitorInfo]:
+        """Get all configured competitors."""
+        return self._competitors.copy()
     
-    def get_data_source_config(self, source_name: str) -> Dict[str, Any]:
-        """Get configuration for a specific data source"""
-        return self.data_sources_config.get(source_name, {})
+    def get_competitors_by_priority(self, priority: str) -> List[CompetitorInfo]:
+        """
+        Get competitors filtered by priority level.
+        
+        Args:
+            priority: Priority level (low, medium, high)
+            
+        Returns:
+            List of competitors with specified priority
+        """
+        return [comp for comp in self._competitors if comp.priority == priority]
     
     def is_data_source_enabled(self, source_name: str) -> bool:
-        """Check if a data source is enabled"""
-        source_config = self.get_data_source_config(source_name)
-        if isinstance(source_config, dict):
-            return source_config.get('enabled', False)
-        return bool(source_config)
+        """
+        Check if a data source is enabled.
+        
+        Args:
+            source_name: Name of the data source to check
+            
+        Returns:
+            True if enabled, False otherwise
+        """
+        source_mapping = {
+            "websites": self.data_sources.company_websites,
+            "funding": self.data_sources.funding_data.get("enabled", False),
+            "jobs": self.data_sources.job_boards.get("enabled", False),
+            "news": self.data_sources.news_sources.get("enabled", False),
+            "social": self.data_sources.social_media.get("enabled", False),
+            "github": self.data_sources.github_repos.get("enabled", False),
+            "patents": self.data_sources.patent_databases.get("enabled", False)
+        }
+        
+        return source_mapping.get(source_name, False)
     
-    def override_from_cli_args(self, args) -> None:
-        """Override configuration with command line arguments"""
-        if hasattr(args, 'output_dir') and args.output_dir:
-            self._config_data['output']['output_dir'] = args.output_dir
+    def save_config(self) -> None:
+        """Save current configuration back to YAML file."""
+        config_dict = {
+            "llm": {
+                "provider": self.llm.provider,
+                "models": self.llm.models,
+                "temperature": self.llm.temperature,
+                "max_tokens": self.llm.max_tokens,
+                "fallback_model": self.llm.fallback_model
+            },
+            "competitors": [
+                {
+                    "name": comp.name,
+                    "website": comp.website,
+                    "focus_areas": comp.focus_areas,
+                    "priority": comp.priority,
+                    "market_segment": comp.market_segment,
+                    "competitive_threat": comp.competitive_threat,
+                    "last_analyzed": comp.last_analyzed.isoformat() if comp.last_analyzed else None
+                }
+                for comp in self._competitors
+            ],
+            "analysis": self.analysis,
+            "scraping": {
+                "delay_between_requests": self.scraping.delay_between_requests,
+                "max_pages_per_site": self.scraping.max_pages_per_site,
+                "timeout": self.scraping.timeout,
+                "concurrent_requests": self.scraping.concurrent_requests,
+                "rate_limit": self.scraping.rate_limit,
+                "user_agent": self.scraping.user_agent,
+                "respect_robots_txt": self.scraping.respect_robots_txt,
+                "target_pages": self.scraping.target_pages
+            },
+            "data_sources": {
+                "company_websites": self.data_sources.company_websites,
+                "funding_data": self.data_sources.funding_data,
+                "job_boards": self.data_sources.job_boards,
+                "news_sources": self.data_sources.news_sources,
+                "social_media": self.data_sources.social_media,
+                "github_repos": self.data_sources.github_repos,
+                "patent_databases": self.data_sources.patent_databases
+            },
+            "output": {
+                "formats": self.output.formats,
+                "output_dir": self.output.output_dir,
+                "include_charts": self.output.include_charts,
+                "include_screenshots": self.output.include_screenshots,
+                "include_competitive_matrix": self.output.include_competitive_matrix,
+                "include_swot_analysis": self.output.include_swot_analysis,
+                "pdf": self.output.pdf,
+                "json": self.output.json
+            }
+        }
         
-        if hasattr(args, 'format') and args.format:
-            self._config_data['output']['formats'] = [args.format]
+        with open(self.config_path, 'w', encoding='utf-8') as file:
+            yaml.dump(config_dict, file, default_flow_style=False, indent=2)
         
-        if hasattr(args, 'depth') and args.depth:
-            self._config_data['analysis']['depth_level'] = args.depth
+        logger.info(f"Configuration saved to {self.config_path}")
+    
+    def validate_api_keys(self) -> Dict[str, bool]:
+        """
+        Validate that required API keys are available.
         
-        if hasattr(args, 'competitors') and args.competitors:
-            # Filter competitors based on CLI args
-            filtered_competitors = [
-                comp for comp in self.competitors
-                if comp['name'].lower() in [c.lower() for c in args.competitors]
-            ]
-            self._config_data['competitors'] = filtered_competitors
+        Returns:
+            Dictionary mapping provider names to availability status
+        """
+        required_keys = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY", 
+            "perplexity": "PERPLEXITY_API_KEY"
+        }
+        
+        availability = {}
+        for provider, env_var in required_keys.items():
+            availability[provider] = env_var in os.environ and bool(os.environ[env_var])
+        
+        # Check if the configured provider has its API key
+        main_provider_available = availability.get(self.llm.provider, False)
+        if not main_provider_available:
+            logger.warning(f"API key for configured provider '{self.llm.provider}' not found")
+        
+        return availability
+    
+    def __repr__(self) -> str:
+        """String representation of the configuration."""
+        return (f"CompetitorConfig(competitors={len(self._competitors)}, "
+                f"provider={self.llm.provider}, "
+                f"output_formats={self.output.formats})")
 
-# Environment variable support
-def get_env_or_config(key: str, config_value: Any, env_prefix: str = "COMPETITOR_") -> Any:
-    """Get value from environment variable or fall back to config"""
-    env_key = f"{env_prefix}{key.upper()}"
-    env_value = os.getenv(env_key)
+
+# Example usage and validation
+if __name__ == "__main__":
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
     
-    if env_value is not None:
-        # Try to convert to same type as config value
-        if isinstance(config_value, bool):
-            return env_value.lower() in ('true', '1', 'yes')
-        elif isinstance(config_value, int):
-            try:
-                return int(env_value)
-            except ValueError:
-                return config_value
-        elif isinstance(config_value, float):
-            try:
-                return float(env_value)
-            except ValueError:
-                return config_value
-        else:
-            return env_value
+    # Initialize configuration
+    config = CompetitorConfig("competitor_config.yaml")
     
-    return config_value
+    # Add a competitor
+    config.add_competitor(
+        name="Algolia",
+        website="https://www.algolia.com",
+        focus_areas=["search", "autocomplete", "recommendations"],
+        priority="high",
+        market_segment=["enterprise", "mid-market"],
+        competitive_threat="high"
+    )
+    
+    # Validate API keys
+    api_status = config.validate_api_keys()
+    print(f"API Key Status: {api_status}")
+    
+    # Check data source status
+    print(f"Website scraping enabled: {config.is_data_source_enabled('websites')}")
+    print(f"Funding data enabled: {config.is_data_source_enabled('funding')}")
+    
+    # Save configuration
+    config.save_config()
+    
+    print(f"Configuration: {config}")

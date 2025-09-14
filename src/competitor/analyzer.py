@@ -1,11 +1,11 @@
 # src/competitor/analyzer.py
 """
-Main competitor analysis orchestrator
+Main competitor analysis orchestrator - FIXED VERSION
 """
 
 import asyncio
 import logging
-from datetime import datetime, timedelta  # Added timedelta import
+from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 
@@ -15,7 +15,16 @@ from .scraper import CompetitorScraper
 from .collectors import CollectorManager
 from .analysis import AnalysisEngine
 from .reports import ReportGenerator
-from ..llm.provider import LLMProvider  # Fixed import path
+
+# Fixed import path
+try:
+    from ..llm.provider import LLMProvider
+except ImportError:
+    # Fallback for different import structures
+    try:
+        from src.llm.provider import LLMProvider
+    except ImportError:
+        from llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +33,14 @@ class CompetitorAnalyzer:
     
     def __init__(self, config_path: str = "competitor_config.yaml"):
         self.config = CompetitorConfig(config_path)
-        self.llm_provider = LLMProvider()
+        
+        # Initialize LLM provider with better error handling
+        try:
+            self.llm_provider = LLMProvider()
+        except Exception as e:
+            logger.error(f"Failed to initialize LLM provider: {e}")
+            raise RuntimeError(f"LLM provider initialization failed: {e}")
+        
         self.collector_manager = CollectorManager(self.config, self.llm_provider)
         self.analysis_engine = AnalysisEngine(self.config, self.llm_provider)
         self.report_generator = ReportGenerator(self.config, self.llm_provider)
@@ -53,6 +69,8 @@ class CompetitorAnalyzer:
         
         # Collect data for all competitors
         profiles = []
+        start_time = datetime.now()
+        
         for competitor_config in competitors_to_analyze:
             try:
                 profile = await self.analyze_single_competitor(competitor_config)
@@ -63,20 +81,28 @@ class CompetitorAnalyzer:
                 logger.error(f"Failed to analyze {competitor_config['name']}: {e}")
                 continue
         
+        # Calculate analysis duration
+        analysis_duration = (datetime.now() - start_time).total_seconds() / 60
+        
         # Create intelligence container
         intelligence = CompetitorIntelligence(
             profiles=profiles,
             config=self.config.get_analysis_config_object(),
             metadata={
                 'total_competitors_analyzed': len(profiles),
-                'analysis_duration_minutes': 0,  # Would track actual duration
+                'analysis_duration_minutes': round(analysis_duration, 2),
                 'data_sources_used': self._get_active_data_sources(),
-                'llm_models_used': self._get_llm_models_used()
+                'llm_models_used': self._get_llm_models_used(),
+                'analysis_timestamp': datetime.now().isoformat()
             }
         )
         
         # Perform cross-competitor analysis
-        intelligence = await self.analysis_engine.perform_cross_competitor_analysis(intelligence)
+        try:
+            intelligence = await self.analysis_engine.perform_cross_competitor_analysis(intelligence)
+        except Exception as e:
+            logger.error(f"Cross-competitor analysis failed: {e}")
+            # Continue without cross-analysis
         
         logger.info(f"Analysis completed successfully for {len(profiles)} competitors")
         return intelligence
@@ -98,11 +124,15 @@ class CompetitorAnalyzer:
                 threat_level=ThreatLevel(competitor_config.get('competitive_threat', 'medium'))
             )
             
-            # Collect data from various sources
+            # Collect data from various sources with better error handling
             await self._collect_competitor_data(profile, competitor_config)
             
             # Perform AI-powered analysis
-            profile = await self.analysis_engine.analyze_competitor_profile(profile)
+            try:
+                profile = await self.analysis_engine.analyze_competitor_profile(profile)
+            except Exception as e:
+                logger.warning(f"Analysis engine failed for {competitor_name}: {e}")
+                # Continue with basic profile
             
             # Update config with analysis date
             self.config.update_competitor_analysis_date(competitor_name, profile.last_analyzed)
@@ -115,7 +145,7 @@ class CompetitorAnalyzer:
             return None
     
     async def _collect_competitor_data(self, profile: CompetitorProfile, config: Dict[str, Any]) -> None:
-        """Collect data from all enabled sources"""
+        """Collect data from all enabled sources with improved error handling"""
         collection_tasks = []
         
         # Website scraping
@@ -146,9 +176,15 @@ class CompetitorAnalyzer:
         if self.config.is_data_source_enabled('patent_databases'):
             collection_tasks.append(self._collect_patent_data(profile))
         
-        # Execute all collection tasks concurrently
+        # Execute all collection tasks concurrently with error handling
         if collection_tasks:
-            await asyncio.gather(*collection_tasks, return_exceptions=True)
+            results = await asyncio.gather(*collection_tasks, return_exceptions=True)
+            
+            # Log any exceptions
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    task_name = ['website', 'funding', 'jobs', 'news', 'social', 'github', 'patents'][i]
+                    logger.warning(f"Data collection failed for {task_name}: {result}")
     
     async def _collect_website_data(self, profile: CompetitorProfile, config: Dict[str, Any]) -> None:
         """Collect website data using scraper"""
@@ -159,10 +195,10 @@ class CompetitorAnalyzer:
                 website_data = await scraper.scrape_competitor_website(config, target_pages)
                 profile.website_data = website_data
                 
-                # Extract derived information
-                if website_data.key_pages:
+                # Extract derived information safely
+                if website_data and website_data.key_pages:
                     profile.key_features = self._extract_features_from_website(website_data)
-                    profile.technology_stack = website_data.technology_stack
+                    profile.technology_stack = website_data.technology_stack or []
                     profile.case_studies = self._extract_case_studies_from_website(website_data)
                     
         except Exception as e:
@@ -180,7 +216,7 @@ class CompetitorAnalyzer:
         """Collect job posting data"""
         try:
             job_data = await self.collector_manager.collect_job_postings(profile.name)
-            profile.job_postings = job_data
+            profile.job_postings = job_data or []
         except Exception as e:
             logger.warning(f"Job data collection failed for {profile.name}: {e}")
     
@@ -190,7 +226,7 @@ class CompetitorAnalyzer:
             news_config = self.config.get_data_source_config('news_sources')
             days_back = news_config.get('days_back', 90)
             news_data = await self.collector_manager.collect_news_mentions(profile.name, days_back)
-            profile.recent_news = news_data
+            profile.recent_news = news_data or []
         except Exception as e:
             logger.warning(f"News data collection failed for {profile.name}: {e}")
     
@@ -198,7 +234,7 @@ class CompetitorAnalyzer:
         """Collect social media presence data"""
         try:
             social_data = await self.collector_manager.collect_social_presence(profile.name)
-            profile.social_presence = social_data
+            profile.social_presence = social_data or []
         except Exception as e:
             logger.warning(f"Social data collection failed for {profile.name}: {e}")
     
@@ -219,48 +255,56 @@ class CompetitorAnalyzer:
             logger.warning(f"Patent data collection failed for {profile.name}: {e}")
     
     def _extract_features_from_website(self, website_data) -> List[str]:
-        """Extract key features from website scraping data"""
+        """Extract key features from website scraping data with error handling"""
         features = []
         
-        # Extract from products page
-        if 'products' in website_data.key_pages:
-            product_data = website_data.key_pages['products']
-            if isinstance(product_data, dict) and 'features' in product_data:
-                for feature in product_data['features']:
-                    if isinstance(feature, dict):
-                        features.append(feature.get('title', ''))
-                    else:
-                        features.append(str(feature))
-        
-        # Extract from homepage
-        if 'homepage' in website_data.key_pages:
-            homepage_data = website_data.key_pages['homepage']
-            if isinstance(homepage_data, dict) and 'key_content' in homepage_data:
-                # Extract feature-like content from homepage
-                for content in homepage_data['key_content']:
-                    if 'feature' in content.lower() or 'capability' in content.lower():
-                        features.append(content[:100])  # Limit length
+        try:
+            # Extract from products page
+            if website_data.key_pages and 'products' in website_data.key_pages:
+                product_data = website_data.key_pages['products']
+                if isinstance(product_data, dict) and 'features' in product_data:
+                    for feature in product_data['features']:
+                        if isinstance(feature, dict) and 'title' in feature:
+                            features.append(feature.get('title', ''))
+                        elif isinstance(feature, str):
+                            features.append(feature)
+            
+            # Extract from homepage
+            if website_data.key_pages and 'homepage' in website_data.key_pages:
+                homepage_data = website_data.key_pages['homepage']
+                if isinstance(homepage_data, dict) and 'key_content' in homepage_data:
+                    # Extract feature-like content from homepage
+                    for content in homepage_data['key_content']:
+                        if isinstance(content, str) and ('feature' in content.lower() or 'capability' in content.lower()):
+                            features.append(content[:100])  # Limit length
+        except Exception as e:
+            logger.warning(f"Feature extraction failed: {e}")
         
         return list(set(features))[:20]  # Dedupe and limit
     
     def _extract_case_studies_from_website(self, website_data) -> List[Dict[str, str]]:
-        """Extract case studies from website data"""
+        """Extract case studies from website data with error handling"""
         case_studies = []
         
-        # Check customers and case studies pages
-        for page_name in ['customers', 'case_studies']:
-            if page_name in website_data.key_pages:
-                page_data = website_data.key_pages[page_name]
-                if isinstance(page_data, dict) and 'case_studies' in page_data:
-                    case_studies.extend(page_data['case_studies'])
+        try:
+            # Check customers and case studies pages
+            for page_name in ['customers', 'case_studies']:
+                if website_data.key_pages and page_name in website_data.key_pages:
+                    page_data = website_data.key_pages[page_name]
+                    if isinstance(page_data, dict) and 'case_studies' in page_data:
+                        case_studies.extend(page_data['case_studies'])
+        except Exception as e:
+            logger.warning(f"Case study extraction failed: {e}")
         
         return case_studies[:10]  # Limit case studies
     
     async def _save_individual_profile(self, profile: CompetitorProfile) -> None:
-        """Save individual competitor profile"""
+        """Save individual competitor profile with better error handling"""
         try:
             output_dir = Path(self.config.output_config['output_dir'])
-            filename = f"{profile.name.lower().replace(' ', '_')}_profile.json"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            filename = f"{profile.name.lower().replace(' ', '_').replace('.', '_')}_profile.json"
             filepath = output_dir / filename
             
             import json
@@ -273,7 +317,9 @@ class CompetitorAnalyzer:
             def enum_serializer(obj):
                 if hasattr(obj, 'value'):
                     return obj.value
-                return obj
+                elif hasattr(obj, 'isoformat'):
+                    return obj.isoformat()
+                return str(obj)
             
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(profile_dict, f, indent=2, default=enum_serializer, ensure_ascii=False)
@@ -321,85 +367,99 @@ class CompetitorAnalyzer:
         """Get list of active data sources"""
         active_sources = []
         
-        if self.config.is_data_source_enabled('company_websites'):
-            active_sources.append('websites')
-        if self.config.is_data_source_enabled('funding_data'):
-            active_sources.append('funding')
-        if self.config.is_data_source_enabled('job_boards'):
-            active_sources.append('jobs')
-        if self.config.is_data_source_enabled('news_sources'):
-            active_sources.append('news')
-        if self.config.is_data_source_enabled('social_media'):
-            active_sources.append('social')
-        if self.config.is_data_source_enabled('github_repos'):
-            active_sources.append('github')
-        if self.config.is_data_source_enabled('patent_databases'):
-            active_sources.append('patents')
+        try:
+            if self.config.is_data_source_enabled('company_websites'):
+                active_sources.append('websites')
+            if self.config.is_data_source_enabled('funding_data'):
+                active_sources.append('funding')
+            if self.config.is_data_source_enabled('job_boards'):
+                active_sources.append('jobs')
+            if self.config.is_data_source_enabled('news_sources'):
+                active_sources.append('news')
+            if self.config.is_data_source_enabled('social_media'):
+                active_sources.append('social')
+            if self.config.is_data_source_enabled('github_repos'):
+                active_sources.append('github')
+            if self.config.is_data_source_enabled('patent_databases'):
+                active_sources.append('patents')
+        except Exception as e:
+            logger.warning(f"Error determining active data sources: {e}")
         
         return active_sources
     
     def _get_llm_models_used(self) -> Dict[str, str]:
         """Get LLM models configured for different tasks"""
-        return {
-            'analysis': self.config.get_llm_model('analysis'),
-            'summary': self.config.get_llm_model('summary'),
-            'comparison': self.config.get_llm_model('comparison')
-        }
+        try:
+            return {
+                'analysis': self.config.get_llm_model('analysis'),
+                'summary': self.config.get_llm_model('summary'),
+                'comparison': self.config.get_llm_model('comparison')
+            }
+        except Exception as e:
+            logger.warning(f"Error getting LLM models: {e}")
+            return {}
     
     async def update_competitor_threat_levels(self, intelligence: CompetitorIntelligence) -> None:
         """Update threat levels based on analysis"""
         for profile in intelligence.profiles:
-            # Calculate threat level based on various factors
-            threat_score = self._calculate_threat_score(profile)
-            
-            if threat_score >= 0.8:
-                profile.threat_level = ThreatLevel.CRITICAL
-            elif threat_score >= 0.6:
-                profile.threat_level = ThreatLevel.HIGH
-            elif threat_score >= 0.4:
-                profile.threat_level = ThreatLevel.MEDIUM
-            else:
-                profile.threat_level = ThreatLevel.LOW
-            
-            profile.overall_threat_score = threat_score
+            try:
+                # Calculate threat level based on various factors
+                threat_score = self._calculate_threat_score(profile)
+                
+                if threat_score >= 0.8:
+                    profile.threat_level = ThreatLevel.CRITICAL
+                elif threat_score >= 0.6:
+                    profile.threat_level = ThreatLevel.HIGH
+                elif threat_score >= 0.4:
+                    profile.threat_level = ThreatLevel.MEDIUM
+                else:
+                    profile.threat_level = ThreatLevel.LOW
+                
+                profile.overall_threat_score = threat_score
+            except Exception as e:
+                logger.warning(f"Threat level calculation failed for {profile.name}: {e}")
     
     def _calculate_threat_score(self, profile: CompetitorProfile) -> float:
-        """Calculate numerical threat score (0.0 to 1.0)"""
+        """Calculate numerical threat score (0.0 to 1.0) with better error handling"""
         score = 0.0
 
-        # Funding momentum (recent large rounds = higher threat)
-        if profile.funding_info and profile.funding_info.last_round_amount:
-            try:
-                amount = self._normalize_funding_amount(profile.funding_info.last_round_amount)
-                if amount > 100:  # $100M+ round
-                    score += 0.3
-                elif amount > 50:  # $50M+ round
+        try:
+            # Funding momentum (recent large rounds = higher threat)
+            if profile.funding_info and profile.funding_info.last_round_amount:
+                try:
+                    amount = self._normalize_funding_amount(profile.funding_info.last_round_amount)
+                    if amount > 100:  # $100M+ round
+                        score += 0.3
+                    elif amount > 50:  # $50M+ round
+                        score += 0.2
+                    elif amount > 10:  # $10M+ round
+                        score += 0.1
+                except Exception:
+                    pass
+            
+            # Market segment overlap
+            if profile.target_markets:
+                # This would be more sophisticated with actual overlap calculation
+                if 'enterprise' in profile.target_markets:
                     score += 0.2
-                elif amount > 10:  # $10M+ round
+                if 'mid-market' in profile.target_markets:
                     score += 0.1
-            except Exception:
-                pass
-        
-        # Market segment overlap
-        if profile.target_markets:
-            # This would be more sophisticated with actual overlap calculation
-            if 'enterprise' in profile.target_markets:
-                score += 0.2
-            if 'mid-market' in profile.target_markets:
+            
+            # Technology advancement indicators
+            if profile.technology_stack:
+                advanced_tech = ['AI', 'Machine Learning', 'GraphQL', 'Kubernetes', 'Microservices']
+                tech_score = len([tech for tech in profile.technology_stack if tech in advanced_tech])
+                score += min(tech_score * 0.05, 0.2)
+            
+            # Recent activity (news, jobs)
+            if profile.recent_news and len(profile.recent_news) > 10:
                 score += 0.1
-        
-        # Technology advancement indicators
-        if profile.technology_stack:
-            advanced_tech = ['AI', 'Machine Learning', 'GraphQL', 'Kubernetes', 'Microservices']
-            tech_score = len([tech for tech in profile.technology_stack if tech in advanced_tech])
-            score += min(tech_score * 0.05, 0.2)
-        
-        # Recent activity (news, jobs)
-        if profile.recent_news and len(profile.recent_news) > 10:
-            score += 0.1
-        
-        if profile.job_postings and len(profile.job_postings) > 20:
-            score += 0.1
+            
+            if profile.job_postings and len(profile.job_postings) > 20:
+                score += 0.1
+
+        except Exception as e:
+            logger.warning(f"Error calculating threat score: {e}")
 
         return min(score, 1.0)  # Cap at 1.0
 
@@ -410,7 +470,8 @@ class CompetitorAnalyzer:
             return 0.0
 
         try:
-            cleaned = amount_str.replace(',', '').strip().upper()
+            # Clean the string
+            cleaned = amount_str.replace(',', '').replace('$', '').strip().upper()
             multiplier = 1.0
             
             if cleaned.endswith('B'):
@@ -420,8 +481,8 @@ class CompetitorAnalyzer:
                 multiplier = 1.0
                 cleaned = cleaned[:-1]
             
-            # Remove currency symbols
-            cleaned = cleaned.replace(', '').replace('€', '').replace('£', '')
+            # Remove other currency symbols
+            cleaned = cleaned.replace('€', '').replace('£', '')
             
             return float(cleaned) * multiplier
         except (ValueError, AttributeError):
@@ -448,7 +509,7 @@ class CompetitorAnalyzer:
         }
         
         for profile in intelligence.profiles:
-            threat_level = profile.threat_level.value
+            threat_level = profile.threat_level.value if profile.threat_level else 'medium'
             threats[threat_level].append(profile.name)
         
         return threats
@@ -481,9 +542,10 @@ async def run_competitor_analysis(
     Returns:
         List of generated report file paths
     """
-    analyzer = CompetitorAnalyzer(config_path)
-    
+    analyzer = None
     try:
+        analyzer = CompetitorAnalyzer(config_path)
+        
         # Override configuration if needed
         if output_dir:
             analyzer.config._config_data['output']['output_dir'] = output_dir
@@ -501,5 +563,10 @@ async def run_competitor_analysis(
         
         return report_files
         
+    except Exception as e:
+        logger.error(f"Analysis failed: {e}")
+        return []
+        
     finally:
-        await analyzer.cleanup()
+        if analyzer:
+            await analyzer.cleanup()

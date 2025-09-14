@@ -15,7 +15,7 @@ from .scraper import CompetitorScraper
 from .collectors import CollectorManager
 from .analysis import AnalysisEngine
 from .reports import ReportGenerator
-from src.llm.provider import LLMProvider
+from  llm.provider import LLMProvider
 
 logger = logging.getLogger(__name__)
 

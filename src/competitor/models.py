@@ -356,7 +356,26 @@ class CompetitorProfile:
             "data_sources_used": [source.value for source in self.data_sources_used],
             "confidence_score": self.confidence_score
         }
-    
+
+    @property
+    def threat_level(self) -> ThreatLevel:
+        """Alias for competitive_threat to maintain backwards compatibility."""
+        return self.competitive_threat
+
+    @threat_level.setter
+    def threat_level(self, value: Union[ThreatLevel, str, None]) -> None:
+        """Allow legacy assignments to map to competitive_threat."""
+        if value is None:
+            self.competitive_threat = ThreatLevel.MEDIUM
+        elif isinstance(value, ThreatLevel):
+            self.competitive_threat = value
+        elif isinstance(value, str):
+            self.competitive_threat = ThreatLevel(value.lower())
+        else:
+            raise TypeError(
+                "Threat level must be a ThreatLevel, string, or None"
+            )
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'CompetitorProfile':
         """Create CompetitorProfile from dictionary."""

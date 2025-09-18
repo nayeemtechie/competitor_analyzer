@@ -120,8 +120,8 @@ class CompetitorAnalyzer:
                 name=competitor_name,
                 website=competitor_website,
                 target_markets=competitor_config.get('market_segment', []),
-                last_analyzed=datetime.now().isoformat(),
-                threat_level=ThreatLevel(competitor_config.get('competitive_threat', 'medium'))
+                last_analyzed=datetime.now(),
+                competitive_threat=ThreatLevel(competitor_config.get('competitive_threat', 'medium'))
             )
             
             # Collect data from various sources with better error handling

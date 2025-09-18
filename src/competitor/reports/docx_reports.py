@@ -291,20 +291,25 @@ class DOCXReportGenerator:
         # Basic information table
         table = doc.add_table(rows=5, cols=2)
         table.style = 'Light Shading Accent 1'
-        
+
         # Table content
         table.cell(0, 0).text = 'Website'
         table.cell(0, 1).text = profile.website
-        
+
         table.cell(1, 0).text = 'Threat Level'
         table.cell(1, 1).text = profile.threat_level.value.title() if profile.threat_level else 'Medium'
-        
+
         table.cell(2, 0).text = 'Target Markets'
         table.cell(2, 1).text = ', '.join(profile.target_markets) if profile.target_markets else 'Unknown'
-        
+
         table.cell(3, 0).text = 'Last Analyzed'
-        table.cell(3, 1).text = profile.last_analyzed or 'N/A'
-        
+        last_analyzed_value = profile.last_analyzed
+        if isinstance(last_analyzed_value, datetime):
+            last_analyzed_text = last_analyzed_value.isoformat()
+        else:
+            last_analyzed_text = last_analyzed_value or 'N/A'
+        table.cell(3, 1).text = last_analyzed_text
+
         table.cell(4, 0).text = 'Technology Stack'
         table.cell(4, 1).text = ', '.join(profile.technology_stack) if profile.technology_stack else 'Unknown'
         

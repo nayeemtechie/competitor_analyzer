@@ -359,14 +359,19 @@ class PDFReportGenerator:
         
         content = []
         content.append(Paragraph(f"Competitor Profile: {profile.name}", heading_style))
-        
+
         # Basic information table
+        last_analyzed_value = profile.last_analyzed
+        if isinstance(last_analyzed_value, datetime):
+            last_analyzed_text = last_analyzed_value.isoformat()
+        else:
+            last_analyzed_text = last_analyzed_value or 'N/A'
         basic_info = [
             ['Attribute', 'Value'],
             ['Website', profile.website],
             ['Threat Level', profile.threat_level.value.title() if profile.threat_level else 'Medium'],
             ['Target Markets', ', '.join(profile.target_markets) if profile.target_markets else 'Unknown'],
-            ['Last Analyzed', profile.last_analyzed or 'N/A']
+            ['Last Analyzed', last_analyzed_text]
         ]
         
         info_table = Table(basic_info, colWidths=[1.5*inch, 4*inch])

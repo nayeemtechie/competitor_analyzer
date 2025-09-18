@@ -7,6 +7,7 @@ Supports OpenAI, Anthropic, and Perplexity APIs with automatic failover.
 import os
 import asyncio
 import logging
+import threading
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass
@@ -34,8 +35,16 @@ from aiohttp import ClientSession, ClientTimeout
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "LLMProvider",
+    "LLMProviderManager",
+    "LLMProviderName",
+    "LLMRequest",
+    "LLMResponse",
+]
 
-class LLMProvider(Enum):
+
+class LLMProviderName(Enum):
     """Supported LLM providers."""
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
@@ -582,17 +591,17 @@ class LLMProviderManager:
     async def test_connection(self, provider_name: Optional[str] = None) -> Dict[str, bool]:
         """
         Test connection to providers.
-        
+
         Args:
             provider_name: Specific provider to test, or None for all
-            
+
         Returns:
             Dictionary mapping provider names to connection status
         """
         results = {}
-        
+
         providers_to_test = {provider_name: self.providers[provider_name]} if provider_name else self.providers
-        
+
         for name, provider in providers_to_test.items():
             try:
                 test_request = LLMRequest(
@@ -601,15 +610,118 @@ class LLMProviderManager:
                     max_tokens=50,
                     temperature=0
                 )
-                
+
                 response = await provider.generate(test_request)
                 results[name] = response.success and "successful" in response.content.lower()
-                
+
             except Exception as e:
                 logger.error(f"Connection test failed for {name}: {e}")
                 results[name] = False
-        
+
         return results
+
+
+class LLMProvider:
+    """High-level LLM interface that wraps :class:`LLMProviderManager`."""
+
+    def __init__(self, config=None, manager: Optional[LLMProviderManager] = None):
+        """Create a provider instance.
+
+        Args:
+            config: Optional configuration object passed to the manager.
+            manager: Preconfigured manager instance (useful for testing).
+        """
+
+        self._manager = manager or LLMProviderManager(config=config)
+
+    @property
+    def manager(self) -> LLMProviderManager:
+        """Return the underlying :class:`LLMProviderManager` instance."""
+
+        return self._manager
+
+    async def achat(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: Optional[str] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 4000,
+        json_mode: bool = False,
+        retry_attempts: int = 3,
+    ) -> str:
+        """Asynchronously generate a chat completion using the configured manager."""
+
+        response = await self._manager.generate(
+            system_prompt=system,
+            user_prompt=user,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+            retry_attempts=retry_attempts,
+        )
+
+        if not response.success:
+            raise RuntimeError(response.error or "LLM generation failed")
+
+        return response.content
+
+    def chat(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: Optional[str] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 4000,
+        json_mode: bool = False,
+        retry_attempts: int = 3,
+    ) -> str:
+        """Synchronously generate a chat completion.
+
+        When no event loop is running the coroutine is executed with
+        :func:`asyncio.run`. If a loop is already active (e.g. from an async
+        context), the coroutine is executed in a dedicated background thread so
+        that we do not interfere with the running loop.
+        """
+
+        async def _run_async() -> str:
+            return await self.achat(
+                system=system,
+                user=user,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                json_mode=json_mode,
+                retry_attempts=retry_attempts,
+            )
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(_run_async())
+
+        result_holder: List[str] = []
+        error_holder: List[BaseException] = []
+
+        def _execute() -> None:
+            try:
+                result_holder.append(asyncio.run(_run_async()))
+            except BaseException as exc:  # noqa: BLE001 - propagate original error
+                error_holder.append(exc)
+
+        thread = threading.Thread(target=_execute)
+        thread.start()
+        thread.join()
+
+        if error_holder:
+            raise error_holder[0]
+        if result_holder:
+            return result_holder[0]
+
+        raise RuntimeError("LLM chat call finished without producing a result")
 
 
 # Convenience functions for easy usage

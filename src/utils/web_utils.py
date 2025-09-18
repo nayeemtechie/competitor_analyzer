@@ -16,8 +16,12 @@ import json
 from pathlib import Path
 
 # Import our scraper
-from ..competitor.scraper import WebScraper, ScrapingResult
-from ..competitor.models import WebsiteData, CompetitorProfile
+try:  # pragma: no cover - import resolution depends on installation context
+    from ..competitor.scraper import WebScraper, ScrapingResult
+    from ..competitor.models import WebsiteData, CompetitorProfile
+except ImportError:  # Fallback for top-level package imports
+    from competitor.scraper import WebScraper, ScrapingResult
+    from competitor.models import WebsiteData, CompetitorProfile
 
 logger = logging.getLogger(__name__)
 

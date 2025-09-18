@@ -89,21 +89,39 @@ class FundingRound:
 @dataclass
 class FundingInfo:
     """Complete funding information for a company."""
-    total_funding: Optional[float] = None
+
+    total_funding: Optional[str] = None
     currency: str = "USD"
     funding_rounds: List[FundingRound] = field(default_factory=list)
     last_funding_date: Optional[datetime] = None
+    last_round_amount: Optional[str] = None
+    last_round_type: Optional[str] = None
+    last_round_date: Optional[str] = None
     investors: List[str] = field(default_factory=list)
-    current_valuation: Optional[float] = None
+    funding_trend: Optional[str] = None
+    valuation: Optional[str] = None
+    current_valuation: Optional[str] = None
     ipo_status: Optional[str] = None  # private, public, acquired
-    
+
+    def __post_init__(self):
+        """Keep valuation aliases in sync for backwards compatibility."""
+        if self.valuation and not self.current_valuation:
+            self.current_valuation = self.valuation
+        elif self.current_valuation and not self.valuation:
+            self.valuation = self.current_valuation
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "total_funding": self.total_funding,
             "currency": self.currency,
             "funding_rounds": [round.to_dict() for round in self.funding_rounds],
             "last_funding_date": self.last_funding_date.isoformat() if self.last_funding_date else None,
+            "last_round_amount": self.last_round_amount,
+            "last_round_type": self.last_round_type,
+            "last_round_date": self.last_round_date,
             "investors": self.investors,
+            "funding_trend": self.funding_trend,
+            "valuation": self.valuation,
             "current_valuation": self.current_valuation,
             "ipo_status": self.ipo_status
         }
@@ -114,7 +132,7 @@ class JobPosting:
     """Individual job posting information."""
     title: str
     department: str
-    location: str
+    location: str = ""
     posted_date: Optional[datetime] = None
     source: Optional[str] = None
     requirements: List[str] = field(default_factory=list)
@@ -188,8 +206,8 @@ class GitHubActivity:
 class NewsItem:
     """News article or mention."""
     title: str
-    url: str
-    source: str
+    url: str = ""
+    source: str = ""
     published_date: Optional[datetime] = None
     summary: Optional[str] = None
     sentiment: Optional[str] = None  # positive, negative, neutral
@@ -286,14 +304,16 @@ class CompetitorProfile:
     key_features: List[str] = field(default_factory=list)
     competitive_advantages: List[str] = field(default_factory=list)
     weaknesses: List[str] = field(default_factory=list)
-    
+    technology_stack: List[str] = field(default_factory=list)
+
     # Data Sources
     contact_info: Optional[ContactInfo] = None
     funding_info: Optional[FundingInfo] = None
     job_postings: List[JobPosting] = field(default_factory=list)
     social_presence: List[SocialMediaPresence] = field(default_factory=list)
     github_activity: Optional[GitHubActivity] = None
-    news_items: List[NewsItem] = field(default_factory=list)
+    recent_news: List[NewsItem] = field(default_factory=list)
+    case_studies: List[Dict[str, Any]] = field(default_factory=list)
     patents: List[Patent] = field(default_factory=list)
     website_data: List[WebsiteData] = field(default_factory=list)
     
@@ -321,12 +341,14 @@ class CompetitorProfile:
             "key_features": self.key_features,
             "competitive_advantages": self.competitive_advantages,
             "weaknesses": self.weaknesses,
+            "technology_stack": self.technology_stack,
             "contact_info": self.contact_info.to_dict() if self.contact_info else None,
             "funding_info": self.funding_info.to_dict() if self.funding_info else None,
             "job_postings": [job.to_dict() for job in self.job_postings],
             "social_presence": [social.to_dict() for social in self.social_presence],
             "github_activity": self.github_activity.to_dict() if self.github_activity else None,
-            "news_items": [news.to_dict() for news in self.news_items],
+            "recent_news": [news.to_dict() for news in self.recent_news],
+            "case_studies": self.case_studies,
             "patents": [patent.to_dict() for patent in self.patents],
             "website_data": [site.to_dict() for site in self.website_data],
             "last_analyzed": self.last_analyzed.isoformat() if self.last_analyzed else None,
@@ -388,11 +410,12 @@ class CompetitorProfile:
                 github_data["last_activity"] = datetime.fromisoformat(github_data["last_activity"])
             github_activity = GitHubActivity(**github_data)
         
-        news_items = []
-        for news_data in data.get("news_items", []):
+        news_entries = data.get("recent_news") or data.get("news_items", [])
+        recent_news = []
+        for news_data in news_entries:
             if news_data.get("published_date"):
                 news_data["published_date"] = datetime.fromisoformat(news_data["published_date"])
-            news_items.append(NewsItem(**news_data))
+            recent_news.append(NewsItem(**news_data))
         
         patents = []
         for patent_data in data.get("patents", []):
@@ -423,12 +446,14 @@ class CompetitorProfile:
             key_features=data.get("key_features", []),
             competitive_advantages=data.get("competitive_advantages", []),
             weaknesses=data.get("weaknesses", []),
+            technology_stack=data.get("technology_stack", []),
             contact_info=contact_info,
             funding_info=funding_info,
             job_postings=job_postings,
             social_presence=social_presence,
             github_activity=github_activity,
-            news_items=news_items,
+            recent_news=recent_news,
+            case_studies=data.get("case_studies", []),
             patents=patents,
             website_data=website_data,
             last_analyzed=last_analyzed,

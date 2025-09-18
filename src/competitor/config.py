@@ -222,6 +222,22 @@ class CompetitorConfig:
         if "competitors" in self._raw_config:
             self._competitors = []
             for comp_data in self._raw_config["competitors"]:
+                last_analyzed = comp_data.get("last_analyzed")
+                if isinstance(last_analyzed, str):
+                    normalized_value = (
+                        last_analyzed.replace("Z", "+00:00")
+                        if last_analyzed.endswith("Z")
+                        else last_analyzed
+                    )
+                    try:
+                        last_analyzed = datetime.fromisoformat(normalized_value)
+                    except ValueError:
+                        logger.warning(
+                            "Invalid last_analyzed value '%s' for competitor '%s'",
+                            last_analyzed,
+                            comp_data.get("name", "<unknown>")
+                        )
+                        last_analyzed = None
                 competitor = CompetitorInfo(
                     name=comp_data["name"],
                     website=comp_data["website"],
@@ -229,7 +245,7 @@ class CompetitorConfig:
                     priority=comp_data.get("priority", "medium"),
                     market_segment=comp_data.get("market_segment", []),
                     competitive_threat=comp_data.get("competitive_threat", "medium"),
-                    last_analyzed=comp_data.get("last_analyzed")
+                    last_analyzed=last_analyzed
                 )
                 self._competitors.append(competitor)
         
@@ -426,10 +442,10 @@ class CompetitorConfig:
     def remove_competitor(self, name: str) -> bool:
         """
         Remove a competitor from the configuration.
-        
+
         Args:
             name: Competitor name to remove
-            
+
         Returns:
             True if competitor was removed, False if not found
         """
@@ -438,14 +454,77 @@ class CompetitorConfig:
                 del self._competitors[i]
                 logger.info(f"Removed competitor: {name}")
                 return True
-        
+
         logger.warning(f"Competitor not found: {name}")
         return False
-    
+
+    def update_competitor_analysis_date(
+        self,
+        name: str,
+        analysis_date: Union[datetime, str, None]
+    ) -> None:
+        """Update the ``last_analyzed`` timestamp for a competitor and persist it.
+
+        Args:
+            name: Name of the competitor to update.
+            analysis_date: Datetime object or ISO formatted string representing the
+                most recent analysis time. ``None`` clears the stored value.
+        """
+
+        competitor = self.get_competitor_by_name(name)
+        if not competitor:
+            logger.warning(
+                "Attempted to update analysis date for unknown competitor '%s'",
+                name
+            )
+            return
+
+        parsed_date: Optional[datetime]
+        if analysis_date is None:
+            parsed_date = None
+        elif isinstance(analysis_date, datetime):
+            parsed_date = analysis_date
+        elif isinstance(analysis_date, str):
+            try:
+                normalized_value = (
+                    analysis_date.replace("Z", "+00:00")
+                    if analysis_date.endswith("Z")
+                    else analysis_date
+                )
+                parsed_date = datetime.fromisoformat(normalized_value)
+            except ValueError:
+                logger.warning(
+                    "Invalid analysis date '%s' provided for competitor '%s'",
+                    analysis_date,
+                    name
+                )
+                return
+        else:
+            logger.warning(
+                "Unsupported analysis date type '%s' for competitor '%s'",
+                type(analysis_date).__name__,
+                name
+            )
+            return
+
+        competitor.last_analyzed = parsed_date
+
+        # Refresh serialised representation and persist the change
+        self._raw_config.setdefault("competitors", [])
+        self._raw_config["competitors"] = self.competitors
+
+        try:
+            self.save_config()
+        except Exception:  # pragma: no cover - persistence errors are logged
+            logger.exception(
+                "Failed to save updated analysis date for competitor '%s'",
+                name
+            )
+
     def get_competitor_by_name(self, name: str) -> Optional[CompetitorInfo]:
         """
         Get competitor configuration by name.
-        
+
         Args:
             name: Competitor name
             

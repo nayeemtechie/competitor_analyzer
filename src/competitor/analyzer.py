@@ -120,7 +120,7 @@ class CompetitorAnalyzer:
                 name=competitor_name,
                 website=competitor_website,
                 target_markets=competitor_config.get('market_segment', []),
-                last_analyzed=datetime.now().isoformat(),
+                last_analyzed=datetime.now(),
                 threat_level=ThreatLevel(competitor_config.get('competitive_threat', 'medium'))
             )
             

@@ -11,6 +11,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import logging
 from datetime import datetime
+from copy import deepcopy
+
+try:  # pragma: no cover - import fallback for alternative YAML implementations
+    from yaml import YAMLError
+except ImportError:  # pragma: no cover
+    YAMLError = Exception
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +122,34 @@ class OutputConfig:
     })
 
 
+@dataclass(frozen=True)
+class _DepthLevel:
+    """Simple wrapper providing a value attribute for depth level strings."""
+
+    value: str
+
+
+@dataclass(frozen=True)
+class AnalysisConfigSummary:
+    """Lightweight container describing active analysis configuration."""
+
+    depth_level: _DepthLevel
+    competitors: List[str]
+    output_formats: List[str]
+    target_pages: List[Dict[str, Any]]
+    data_sources: Dict[str, bool]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a serialisable representation of the summary."""
+        return {
+            "depth_level": self.depth_level.value,
+            "competitors": self.competitors,
+            "output_formats": self.output_formats,
+            "target_pages": deepcopy(self.target_pages),
+            "data_sources": deepcopy(self.data_sources)
+        }
+
+
 class CompetitorConfig:
     """Main configuration management class."""
     
@@ -135,7 +169,7 @@ class CompetitorConfig:
         self.scraping: ScrapingConfig = ScrapingConfig()
         self.data_sources: DataSourceConfig = DataSourceConfig()
         self.output: OutputConfig = OutputConfig()
-        self.analysis: Dict[str, str] = {"depth_level": "standard"}
+        self.analysis: Dict[str, Any] = {"depth_level": "standard"}
         
         # Load configuration if file exists
         if self.config_path.exists():
@@ -143,7 +177,12 @@ class CompetitorConfig:
         else:
             logger.warning(f"Configuration file {config_path} not found. Using defaults.")
             self._create_default_config()
-    
+            # Parse the freshly created defaults so all properties are initialised
+            try:
+                self.load_config()
+            except Exception:  # pragma: no cover - defensive guard, should not happen in tests
+                logger.exception("Failed to load default configuration")
+
     def load_config(self) -> None:
         """Load configuration from YAML file."""
         try:
@@ -156,7 +195,7 @@ class CompetitorConfig:
             
             logger.info(f"Configuration loaded successfully from {self.config_path}")
             
-        except yaml.YAMLError as e:
+        except YAMLError as e:
             logger.error(f"Error parsing YAML configuration: {e}")
             raise
         except FileNotFoundError:
@@ -262,7 +301,11 @@ class CompetitorConfig:
         # Validate LLM provider
         valid_providers = ["openai", "anthropic", "perplexity"]
         if self.llm.provider not in valid_providers:
-            raise ValueError(f"Invalid LLM provider: {self.llm.provider}. Must be one of {valid_providers}")
+            logger.warning(
+                "Using unrecognised LLM provider '%s'. Expected one of %s",
+                self.llm.provider,
+                valid_providers
+            )
         
         # Validate competitor data
         if not self._competitors:
@@ -417,11 +460,11 @@ class CompetitorConfig:
     def get_all_competitors(self) -> List[CompetitorInfo]:
         """Get all configured competitors."""
         return self._competitors.copy()
-    
+
     def get_competitors_by_priority(self, priority: str) -> List[CompetitorInfo]:
         """
         Get competitors filtered by priority level.
-        
+
         Args:
             priority: Priority level (low, medium, high)
             
@@ -442,15 +485,20 @@ class CompetitorConfig:
         """
         source_mapping = {
             "websites": self.data_sources.company_websites,
-            "funding": self.data_sources.funding_data.get("enabled", False),
-            "jobs": self.data_sources.job_boards.get("enabled", False),
-            "news": self.data_sources.news_sources.get("enabled", False),
-            "social": self.data_sources.social_media.get("enabled", False),
-            "github": self.data_sources.github_repos.get("enabled", False),
-            "patents": self.data_sources.patent_databases.get("enabled", False)
+            "funding": self.data_sources.funding_data,
+            "jobs": self.data_sources.job_boards,
+            "news": self.data_sources.news_sources,
+            "social": self.data_sources.social_media,
+            "github": self.data_sources.github_repos,
+            "patents": self.data_sources.patent_databases
         }
-        
-        return source_mapping.get(source_name, False)
+
+        value = source_mapping.get(source_name)
+
+        if isinstance(value, dict):
+            return bool(value.get("enabled", False))
+
+        return bool(value)
     
     def save_config(self) -> None:
         """Save current configuration back to YAML file."""
@@ -534,7 +582,156 @@ class CompetitorConfig:
             logger.warning(f"API key for configured provider '{self.llm.provider}' not found")
         
         return availability
-    
+
+    @property
+    def llm_config(self) -> Dict[str, Any]:
+        """Return the LLM configuration as a plain dictionary."""
+        return {
+            "provider": self.llm.provider,
+            "models": dict(self.llm.models),
+            "temperature": self.llm.temperature,
+            "max_tokens": self.llm.max_tokens,
+            "fallback_model": self.llm.fallback_model
+        }
+
+    @property
+    def competitors(self) -> List[Dict[str, Any]]:
+        """Return configured competitors as dictionaries for easy consumption."""
+        competitors_list: List[Dict[str, Any]] = []
+
+        for competitor in self._competitors:
+            competitor_dict = {
+                "name": competitor.name,
+                "website": competitor.website,
+                "focus_areas": list(competitor.focus_areas),
+                "priority": competitor.priority,
+                "market_segment": list(competitor.market_segment),
+                "competitive_threat": competitor.competitive_threat,
+                "last_analyzed": (
+                    competitor.last_analyzed.isoformat()
+                    if isinstance(competitor.last_analyzed, datetime)
+                    else competitor.last_analyzed
+                )
+            }
+            competitors_list.append(competitor_dict)
+
+        return competitors_list
+
+    @property
+    def analysis_config(self) -> Dict[str, Any]:
+        """Return a defensive copy of the analysis configuration."""
+        return deepcopy(self.analysis)
+
+    @property
+    def output_config(self) -> Dict[str, Any]:
+        """Return the reporting/output configuration as a dictionary."""
+        return {
+            "formats": list(self.output.formats),
+            "output_dir": self.output.output_dir,
+            "include_charts": self.output.include_charts,
+            "include_screenshots": self.output.include_screenshots,
+            "include_competitive_matrix": self.output.include_competitive_matrix,
+            "include_swot_analysis": self.output.include_swot_analysis,
+            "pdf": deepcopy(self.output.pdf),
+            "json": deepcopy(self.output.json)
+        }
+
+    def get_llm_model(self, task: str) -> str:
+        """Return the configured model for a particular task with fallback."""
+        return self.llm.models.get(task, self.llm.fallback_model)
+
+    def _normalize_data_source_config(self, name: str, value: Any) -> Dict[str, Any]:
+        """Merge a data source configuration with sensible defaults."""
+        base_config: Dict[str, Any] = {
+            "enabled": True,
+            "cache_enabled": True,
+            "cache_ttl_hours": 24,
+            "cache_dir": str(Path("cache"))
+        }
+
+        if name == "company_websites":
+            base_config.update({
+                "user_agent": self.scraping.user_agent,
+                "rate_limit": self.scraping.rate_limit,
+                "delay_between_requests": self.scraping.delay_between_requests,
+            })
+
+        if isinstance(value, dict):
+            merged = {**base_config, **value}
+        elif isinstance(value, bool):
+            merged = {**base_config, "enabled": value}
+        else:
+            merged = base_config.copy()
+
+        return deepcopy(merged)
+
+    def get_data_source_config(self, source_name: str) -> Dict[str, Any]:
+        """Return the configuration for a particular data source."""
+        if not hasattr(self.data_sources, source_name):
+            raise KeyError(f"Unknown data source '{source_name}'")
+
+        value = getattr(self.data_sources, source_name)
+        return self._normalize_data_source_config(source_name, value)
+
+    def get_target_pages(self) -> List[Dict[str, Any]]:
+        """Return configured target pages for website scraping."""
+        analysis_section = self.analysis if isinstance(self.analysis, dict) else {}
+        target_pages = analysis_section.get("target_pages")
+
+        if target_pages:
+            return deepcopy(target_pages)
+
+        return deepcopy(getattr(self.scraping, "target_pages", []))
+
+    def get_analysis_config_object(self) -> AnalysisConfigSummary:
+        """Create a rich summary object used throughout the application."""
+        depth = self.analysis.get("depth_level", "standard")
+
+        data_sources_status = {
+            "websites": self.is_data_source_enabled("websites"),
+            "funding": self.is_data_source_enabled("funding"),
+            "jobs": self.is_data_source_enabled("jobs"),
+            "news": self.is_data_source_enabled("news"),
+            "social": self.is_data_source_enabled("social"),
+            "github": self.is_data_source_enabled("github"),
+            "patents": self.is_data_source_enabled("patents")
+        }
+
+        return AnalysisConfigSummary(
+            depth_level=_DepthLevel(depth),
+            competitors=[comp["name"] for comp in self.competitors],
+            output_formats=list(self.output_config["formats"]),
+            target_pages=self.get_target_pages(),
+            data_sources=data_sources_status
+        )
+
+    def override_from_cli_args(self, args: Any) -> None:
+        """Apply runtime overrides provided by CLI arguments."""
+        updated = False
+
+        output_dir = getattr(args, "output", None) or getattr(args, "output_dir", None)
+        if output_dir:
+            self.output.output_dir = output_dir
+            updated = True
+
+        depth = getattr(args, "depth", None)
+        if depth:
+            self.analysis["depth_level"] = depth
+            updated = True
+
+        formats = getattr(args, "format", None) or getattr(args, "formats", None)
+        if formats:
+            if isinstance(formats, str):
+                parsed_formats = [fmt.strip() for fmt in formats.split(',') if fmt.strip()]
+            else:
+                parsed_formats = list(formats)
+            if parsed_formats:
+                self.output.formats = parsed_formats
+                updated = True
+
+        if updated:
+            logger.debug("Configuration overridden via CLI arguments")
+
     def __repr__(self) -> str:
         """String representation of the configuration."""
         return (f"CompetitorConfig(competitors={len(self._competitors)}, "

@@ -376,7 +376,7 @@ class Patent:
     inventors: List[str] = field(default_factory=list)
     assignee: Optional[str] = None
     status: Optional[str] = None  # pending, granted, expired
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "patent_id": self.patent_id,
@@ -388,6 +388,92 @@ class Patent:
             "assignee": self.assignee,
             "status": self.status
         }
+
+
+@dataclass
+class PatentData:
+    """Aggregated patent portfolio metrics used across the analysis stack."""
+
+    total_patents: int = 0
+    recent_patents: List[Dict[str, Any]] = field(default_factory=list)
+    technology_areas: List[str] = field(default_factory=list)
+    filing_trend: str = "insufficient_data"
+    last_updated: Optional[datetime] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.recent_patents = [
+            self._normalise_patent_entry(entry)
+            for entry in _ensure_list(self.recent_patents)
+        ]
+        self.technology_areas = [str(area) for area in _ensure_list(self.technology_areas)]
+        self.metadata = dict(self.metadata or {})
+
+        if isinstance(self.last_updated, str):
+            try:
+                self.last_updated = datetime.fromisoformat(self.last_updated)
+            except ValueError:
+                self.last_updated = None
+
+    @staticmethod
+    def _normalise_patent_entry(entry: Any) -> Dict[str, Any]:
+        if isinstance(entry, Patent):
+            entry = entry.to_dict()
+        elif not isinstance(entry, dict):
+            return {"title": str(entry)}
+
+        normalised = dict(entry)
+
+        for date_field in ("publication_date", "filing_date", "grant_date"):
+            value = normalised.get(date_field)
+            if isinstance(value, datetime):
+                normalised[date_field] = value.isoformat()
+            elif value is not None:
+                normalised[date_field] = str(value)
+
+        inventors = normalised.get("inventors")
+        if inventors is not None and not isinstance(inventors, list):
+            if isinstance(inventors, (set, tuple)):
+                normalised["inventors"] = [str(inventor) for inventor in inventors]
+            else:
+                normalised["inventors"] = [str(inventors)]
+
+        return normalised
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "total_patents": self.total_patents,
+            "recent_patents": [dict(patent) for patent in self.recent_patents],
+            "technology_areas": list(self.technology_areas),
+            "filing_trend": self.filing_trend,
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+            "metadata": dict(self.metadata)
+        }
+
+    @classmethod
+    def from_dict(cls, data: Union['PatentData', Dict[str, Any], None]) -> 'PatentData':
+        if isinstance(data, cls):
+            return data
+
+        if not data:
+            return cls()
+
+        if not isinstance(data, dict):
+            try:
+                total = int(data)
+            except (TypeError, ValueError):
+                return cls()
+            return cls(total_patents=total)
+
+        payload = dict(data)
+        last_updated = payload.get("last_updated")
+        if isinstance(last_updated, str):
+            try:
+                payload["last_updated"] = datetime.fromisoformat(last_updated)
+            except ValueError:
+                payload["last_updated"] = None
+
+        return cls(**payload)
 
 
 @dataclass
@@ -522,6 +608,7 @@ class CompetitorProfile:
     recent_news: List[NewsItem] = field(default_factory=list)
     case_studies: List[CaseStudy] = field(default_factory=list)
     pricing_tiers: List[PricingTier] = field(default_factory=list)
+    patent_data: Optional[PatentData] = None
     patents: List[Patent] = field(default_factory=list)
     website_data: List[WebsiteData] = field(default_factory=list)
     
@@ -558,6 +645,7 @@ class CompetitorProfile:
             "recent_news": [news.to_dict() for news in self.recent_news],
             "case_studies": [case.to_dict() for case in self.case_studies],
             "pricing_tiers": [tier.to_dict() for tier in self.pricing_tiers],
+            "patent_data": self.patent_data.to_dict() if self.patent_data else None,
             "patents": [patent.to_dict() for patent in self.patents],
             "website_data": [site.to_dict() for site in self.website_data],
             "last_analyzed": self.last_analyzed.isoformat() if self.last_analyzed else None,
@@ -570,6 +658,8 @@ class CompetitorProfile:
         self.case_studies = [CaseStudy.from_dict(case) for case in _ensure_list(self.case_studies)]
         self.pricing_tiers = [PricingTier.from_dict(tier) for tier in _ensure_list(self.pricing_tiers)]
         self.website_data = [WebsiteData.from_dict(site) for site in _ensure_list(self.website_data)]
+        if self.patent_data and not isinstance(self.patent_data, PatentData):
+            self.patent_data = PatentData.from_dict(self.patent_data)
 
     @property
     def threat_level(self) -> ThreatLevel:
@@ -657,6 +747,10 @@ class CompetitorProfile:
                     patent_data[date_field] = datetime.fromisoformat(patent_data[date_field])
             patents.append(Patent(**patent_data))
 
+        patent_data = None
+        if data.get("patent_data"):
+            patent_data = PatentData.from_dict(data["patent_data"])
+
         website_data = [WebsiteData.from_dict(site_data)
                         for site_data in data.get("website_data", [])]
 
@@ -691,6 +785,7 @@ class CompetitorProfile:
             recent_news=recent_news,
             case_studies=case_studies,
             pricing_tiers=pricing_tiers,
+            patent_data=patent_data,
             patents=patents,
             website_data=website_data,
             last_analyzed=last_analyzed,

@@ -5,6 +5,7 @@ Main competitor analysis orchestrator - FIXED VERSION
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from pathlib import Path
@@ -466,27 +467,77 @@ class CompetitorAnalyzer:
     @staticmethod
     def _normalize_funding_amount(amount_str: str) -> float:
         """Convert funding strings like '1.2B' or '300M' to float millions"""
-        if not amount_str:
+        if amount_str is None:
             return 0.0
 
-        try:
-            # Clean the string
-            cleaned = amount_str.replace(',', '').replace('$', '').strip().upper()
-            multiplier = 1.0
-            
-            if cleaned.endswith('B'):
-                multiplier = 1000.0
-                cleaned = cleaned[:-1]
-            elif cleaned.endswith('M'):
-                multiplier = 1.0
-                cleaned = cleaned[:-1]
-            
-            # Remove other currency symbols
-            cleaned = cleaned.replace('€', '').replace('£', '')
-            
-            return float(cleaned) * multiplier
-        except (ValueError, AttributeError):
+        if isinstance(amount_str, (int, float)):
+            value = float(amount_str)
+            # Large raw currency values are assumed to be expressed in dollars
+            # and are converted to millions. Smaller numbers are treated as
+            # already being in millions (e.g. ``500`` == 500M).
+            return value / 1_000_000 if value > 10_000 else value
+
+        if not isinstance(amount_str, str):
             return 0.0
+
+        cleaned = amount_str.strip()
+        if not cleaned:
+            return 0.0
+
+        # Normalise case and remove common currency markers or symbols
+        cleaned = cleaned.upper()
+        cleaned = cleaned.replace(',', '')
+        cleaned = cleaned.replace('$', '').replace('€', '').replace('£', '')
+        cleaned = re.sub(r"\b(USD|EUR|GBP|AUD|CAD|SGD|HKD|JPY|CNY|INR)\b", "", cleaned)
+        cleaned = re.sub(r"[^0-9A-Z\.\s]", " ", cleaned)
+
+        matches = list(
+            re.finditer(
+                r"([0-9]+(?:\.[0-9]+)?)\s*(TRILLIONS?|BILLIONS?|BN|B|TR|T|MILLIONS?|MN|M|THOUSANDS?|K)?",
+                cleaned,
+            )
+        )
+
+        if not matches:
+            return 0.0
+
+        number_str, suffix = matches[-1].groups()
+
+        try:
+            value = float(number_str)
+        except ValueError:
+            return 0.0
+
+        multiplier_map = {
+            None: 1.0,
+            "": 1.0,
+            "M": 1.0,
+            "MN": 1.0,
+            "MILLION": 1.0,
+            "MILLIONS": 1.0,
+            "B": 1000.0,
+            "BN": 1000.0,
+            "BILLION": 1000.0,
+            "BILLIONS": 1000.0,
+            "T": 1_000_000.0,
+            "TR": 1_000_000.0,
+            "TRILLION": 1_000_000.0,
+            "TRILLIONS": 1_000_000.0,
+            "K": 0.001,
+            "THOUSAND": 0.001,
+            "THOUSANDS": 0.001,
+        }
+
+        suffix = (suffix or "").strip()
+        multiplier = multiplier_map.get(suffix, 1.0)
+
+        result = value * multiplier
+
+        # Handle plain numeric strings that likely represent raw currency
+        if multiplier == 1.0 and not suffix and result > 10_000:
+            return result / 1_000_000
+
+        return result
     
     async def generate_executive_summary(self, intelligence: CompetitorIntelligence) -> str:
         """Generate executive summary of competitive landscape"""

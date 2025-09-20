@@ -30,8 +30,8 @@ class WebsiteCollector(CachedCollector):
                 {'path': '/products', 'name': 'products', 'priority': 'high'}
             ]
         
-        website_data = WebsiteData()
-        
+        website_data = WebsiteData(url=website)
+
         async with RateLimitedSession(rate_limit=self.rate_limit) as session:
             for page_info in target_pages:
                 url = urljoin(website, page_info['path'])
@@ -48,8 +48,9 @@ class WebsiteCollector(CachedCollector):
                         if page_info['name'] == 'pricing':
                             pricing_data = await self._extract_pricing_data(soup)
                             if pricing_data:
-                                page_data['pricing_tiers'] = pricing_data
-                        
+                                page_data['pricing_tiers'] = [tier.to_dict() for tier in pricing_data]
+                                website_data.pricing_tiers.extend(pricing_data)
+
                         elif page_info['name'] == 'products':
                             features = await self._extract_product_features(soup)
                             if features:
@@ -63,7 +64,15 @@ class WebsiteCollector(CachedCollector):
         # Extract derived insights
         website_data.technology_stack = await self._detect_technology_stack(website_data)
         website_data.content_themes = await self._extract_content_themes(website_data)
-        
+
+        if website_data.pricing_tiers:
+            deduped: Dict[str, PricingTier] = {}
+            for tier in website_data.pricing_tiers:
+                key = tier.name.lower() if tier.name else tier.price or str(len(deduped))
+                if key not in deduped:
+                    deduped[key] = tier
+            website_data.pricing_tiers = list(deduped.values())
+
         return website_data
     
     async def _analyze_page(self, soup: BeautifulSoup, page_info: Dict, url: str) -> Dict[str, Any]:
@@ -117,7 +126,7 @@ class WebsiteCollector(CachedCollector):
     
     async def _extract_pricing_data(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
         """Extract pricing information"""
-        pricing_tiers = []
+        pricing_tiers: List[PricingTier] = []
         
         # Look for pricing elements
         pricing_elements = soup.find_all(['div', 'section'], 
@@ -133,8 +142,15 @@ class WebsiteCollector(CachedCollector):
             }
             
             if tier_data['name'] or tier_data['price']:
-                pricing_tiers.append(tier_data)
-        
+                pricing_tiers.append(
+                    PricingTier(
+                        name=tier_data['name'],
+                        price=tier_data['price'],
+                        features=tier_data['features'],
+                        popular=tier_data['popular'],
+                    )
+                )
+
         return pricing_tiers
     
     def _extract_tier_name(self, element) -> str:

@@ -11,7 +11,12 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from .config import CompetitorConfig
-from .models import CompetitorProfile, CompetitorIntelligence, ThreatLevel
+from .models import (
+    CompetitorProfile,
+    CompetitorIntelligence,
+    ThreatLevel,
+    CaseStudy,
+)
 from .scraper import CompetitorScraper
 from .collectors import CollectorManager
 from .analysis import AnalysisEngine
@@ -201,7 +206,9 @@ class CompetitorAnalyzer:
                     profile.key_features = self._extract_features_from_website(website_data)
                     profile.technology_stack = website_data.technology_stack or []
                     profile.case_studies = self._extract_case_studies_from_website(website_data)
-                    
+                    if website_data.pricing_tiers:
+                        profile.pricing_tiers = list(website_data.pricing_tiers)
+
         except Exception as e:
             logger.warning(f"Website data collection failed for {profile.name}: {e}")
     
@@ -283,20 +290,29 @@ class CompetitorAnalyzer:
         
         return list(set(features))[:20]  # Dedupe and limit
     
-    def _extract_case_studies_from_website(self, website_data) -> List[Dict[str, str]]:
+    def _extract_case_studies_from_website(self, website_data) -> List[CaseStudy]:
         """Extract case studies from website data with error handling"""
-        case_studies = []
-        
+        case_studies: List[CaseStudy] = []
+
         try:
+            if getattr(website_data, 'case_studies', None):
+                case_studies.extend(
+                    CaseStudy.from_dict(case)
+                    for case in getattr(website_data, 'case_studies', [])
+                )
+
             # Check customers and case studies pages
             for page_name in ['customers', 'case_studies']:
                 if website_data.key_pages and page_name in website_data.key_pages:
                     page_data = website_data.key_pages[page_name]
                     if isinstance(page_data, dict) and 'case_studies' in page_data:
-                        case_studies.extend(page_data['case_studies'])
+                        case_studies.extend(
+                            CaseStudy.from_dict(case)
+                            for case in page_data['case_studies']
+                        )
         except Exception as e:
             logger.warning(f"Case study extraction failed: {e}")
-        
+
         return case_studies[:10]  # Limit case studies
     
     async def _save_individual_profile(self, profile: CompetitorProfile) -> None:

@@ -4,8 +4,8 @@ Core data models and schemas for the competitor analysis system.
 Defines the structure for competitor profiles, analysis results, and reports.
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Any, Union, TYPE_CHECKING
+from dataclasses import dataclass, field, asdict, fields
+from typing import Dict, List, Optional, Any, Union, TYPE_CHECKING, Iterable
 from datetime import datetime
 from enum import Enum
 import json
@@ -50,6 +50,129 @@ class DataSourceType(Enum):
     GITHUB = "github"
     PATENTS = "patents"
     MANUAL = "manual"
+
+
+def _ensure_list(value: Optional[Iterable[Any]]) -> List[Any]:
+    """Return ``value`` as a list without ``None`` values."""
+
+    if not value:
+        return []
+
+    if isinstance(value, list):
+        return [item for item in value if item is not None]
+
+    return [item for item in value if item is not None]
+
+
+@dataclass
+class PricingTier:
+    """Structured pricing tier information extracted from competitor sites."""
+
+    name: str = ""
+    price: Optional[str] = None
+    billing_cycle: Optional[str] = None
+    features: List[str] = field(default_factory=list)
+    description: Optional[str] = None
+    usage_limits: Optional[str] = None
+    value_metric: Optional[str] = None
+    target_customer: Optional[str] = None
+    popular: bool = False
+    cta_url: Optional[str] = None
+    notes: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialise the tier to a JSON friendly dictionary."""
+
+        return {
+            "name": self.name,
+            "price": self.price,
+            "billing_cycle": self.billing_cycle,
+            "features": list(self.features),
+            "description": self.description,
+            "usage_limits": self.usage_limits,
+            "value_metric": self.value_metric,
+            "target_customer": self.target_customer,
+            "popular": self.popular,
+            "cta_url": self.cta_url,
+            "notes": self.notes,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Union['PricingTier', Dict[str, Any], None]) -> 'PricingTier':
+        """Build a :class:`PricingTier` from arbitrary input."""
+
+        if isinstance(data, cls):
+            return data
+
+        if not data:
+            return cls()
+
+        if not isinstance(data, dict):
+            return cls(name=str(data))
+
+        allowed = {field.name for field in fields(cls)}
+        filtered: Dict[str, Any] = {key: value for key, value in data.items() if key in allowed}
+
+        features = filtered.get("features")
+        if isinstance(features, str):
+            filtered["features"] = [features]
+        elif features is not None:
+            filtered["features"] = list(features)
+
+        return cls(**filtered)
+
+
+@dataclass
+class CaseStudy:
+    """Details of a customer case study referenced by a competitor."""
+
+    title: str = ""
+    url: Optional[str] = None
+    summary: Optional[str] = None
+    industry: Optional[str] = None
+    customer_size: Optional[str] = None
+    use_case: Optional[str] = None
+    results: Optional[str] = None
+    metrics: Dict[str, Any] = field(default_factory=dict)
+    region: Optional[str] = None
+    year: Optional[int] = None
+    testimonial: Optional[str] = None
+    customer_name: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "title": self.title,
+            "url": self.url,
+            "summary": self.summary,
+            "industry": self.industry,
+            "customer_size": self.customer_size,
+            "use_case": self.use_case,
+            "results": self.results,
+            "metrics": dict(self.metrics),
+            "region": self.region,
+            "year": self.year,
+            "testimonial": self.testimonial,
+            "customer_name": self.customer_name,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Union['CaseStudy', Dict[str, Any], None]) -> 'CaseStudy':
+        if isinstance(data, cls):
+            return data
+
+        if not data:
+            return cls()
+
+        if not isinstance(data, dict):
+            return cls(title=str(data))
+
+        allowed = {field.name for field in fields(cls)}
+        filtered = {key: value for key, value in data.items() if key in allowed}
+        metrics = filtered.get("metrics")
+        if metrics and not isinstance(metrics, dict):
+            filtered["metrics"] = dict(metrics)
+
+        return cls(**filtered)
 
 
 @dataclass
@@ -258,8 +381,9 @@ class Patent:
 
 @dataclass
 class WebsiteData:
-    """Website content and metadata."""
-    url: str
+    """Website content, derived metadata and structured findings."""
+
+    url: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     content: Optional[str] = None
@@ -269,20 +393,88 @@ class WebsiteData:
     page_type: Optional[str] = None  # homepage, pricing, product, etc.
     load_time: Optional[float] = None
     mobile_friendly: Optional[bool] = None
-    
+    key_pages: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    pages_analyzed: List[str] = field(default_factory=list)
+    pricing_tiers: List[PricingTier] = field(default_factory=list)
+    case_studies: List[CaseStudy] = field(default_factory=list)
+    technology_stack: List[str] = field(default_factory=list)
+    content_themes: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.meta_keywords = _ensure_list(self.meta_keywords)
+        self.technologies = _ensure_list(self.technologies)
+        self.pages_analyzed = _ensure_list(self.pages_analyzed)
+        self.technology_stack = _ensure_list(self.technology_stack)
+        self.content_themes = _ensure_list(self.content_themes)
+        self.pricing_tiers = [PricingTier.from_dict(tier) for tier in _ensure_list(self.pricing_tiers)]
+        self.case_studies = [CaseStudy.from_dict(case) for case in _ensure_list(self.case_studies)]
+        self.key_pages = dict(self.key_pages or {})
+
+        normalised_pages: Dict[str, Dict[str, Any]] = {}
+        for name, page in self.key_pages.items():
+            if isinstance(page, dict):
+                normalised_pages[name] = self._normalise_page_payload(page)
+            else:
+                normalised_pages[name] = page
+        self.key_pages = normalised_pages
+
+    @staticmethod
+    def _normalise_page_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        normalised: Dict[str, Any] = {}
+        for key, value in payload.items():
+            if key == "pricing_tiers" and isinstance(value, list):
+                normalised[key] = [PricingTier.from_dict(item) for item in value]
+            elif key == "case_studies" and isinstance(value, list):
+                normalised[key] = [CaseStudy.from_dict(item) for item in value]
+            else:
+                normalised[key] = value
+        return normalised
+
+    def _serialise_page_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        serialised: Dict[str, Any] = {}
+        for key, value in payload.items():
+            if key in {"pricing_tiers", "case_studies"} and isinstance(value, list):
+                serialised[key] = [item.to_dict() if hasattr(item, "to_dict") else item for item in value]
+            else:
+                serialised[key] = value
+        return serialised
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "url": self.url,
             "title": self.title,
             "description": self.description,
             "content": self.content[:1000] if self.content else None,  # Truncate for serialization
-            "meta_keywords": self.meta_keywords,
-            "technologies": self.technologies,
+            "meta_keywords": list(self.meta_keywords),
+            "technologies": list(self.technologies),
             "last_crawled": self.last_crawled.isoformat() if self.last_crawled else None,
             "page_type": self.page_type,
             "load_time": self.load_time,
-            "mobile_friendly": self.mobile_friendly
+            "mobile_friendly": self.mobile_friendly,
+            "key_pages": {name: self._serialise_page_payload(page)
+                           if isinstance(page, dict) else page
+                           for name, page in self.key_pages.items()},
+            "pages_analyzed": list(self.pages_analyzed),
+            "pricing_tiers": [tier.to_dict() for tier in self.pricing_tiers],
+            "case_studies": [case.to_dict() for case in self.case_studies],
+            "technology_stack": list(self.technology_stack),
+            "content_themes": list(self.content_themes),
         }
+
+    @classmethod
+    def from_dict(cls, data: Union['WebsiteData', Dict[str, Any]]) -> 'WebsiteData':
+        if isinstance(data, cls):
+            return data
+
+        payload = dict(data)
+        last_crawled = payload.get("last_crawled")
+        if isinstance(last_crawled, str):
+            try:
+                payload["last_crawled"] = datetime.fromisoformat(last_crawled)
+            except ValueError:
+                payload["last_crawled"] = None
+
+        return cls(**payload)
 
 
 @dataclass
@@ -317,7 +509,8 @@ class CompetitorProfile:
     social_presence: List[SocialMediaPresence] = field(default_factory=list)
     github_activity: Optional[GitHubActivity] = None
     recent_news: List[NewsItem] = field(default_factory=list)
-    case_studies: List[Dict[str, Any]] = field(default_factory=list)
+    case_studies: List[CaseStudy] = field(default_factory=list)
+    pricing_tiers: List[PricingTier] = field(default_factory=list)
     patents: List[Patent] = field(default_factory=list)
     website_data: List[WebsiteData] = field(default_factory=list)
     
@@ -352,7 +545,8 @@ class CompetitorProfile:
             "social_presence": [social.to_dict() for social in self.social_presence],
             "github_activity": self.github_activity.to_dict() if self.github_activity else None,
             "recent_news": [news.to_dict() for news in self.recent_news],
-            "case_studies": self.case_studies,
+            "case_studies": [case.to_dict() for case in self.case_studies],
+            "pricing_tiers": [tier.to_dict() for tier in self.pricing_tiers],
             "patents": [patent.to_dict() for patent in self.patents],
             "website_data": [site.to_dict() for site in self.website_data],
             "last_analyzed": self.last_analyzed.isoformat() if self.last_analyzed else None,
@@ -360,6 +554,11 @@ class CompetitorProfile:
             "data_sources_used": [source.value for source in self.data_sources_used],
             "confidence_score": self.confidence_score
         }
+
+    def __post_init__(self) -> None:
+        self.case_studies = [CaseStudy.from_dict(case) for case in _ensure_list(self.case_studies)]
+        self.pricing_tiers = [PricingTier.from_dict(tier) for tier in _ensure_list(self.pricing_tiers)]
+        self.website_data = [WebsiteData.from_dict(site) for site in _ensure_list(self.website_data)]
 
     @property
     def threat_level(self) -> ThreatLevel:
@@ -446,13 +645,16 @@ class CompetitorProfile:
                 if patent_data.get(date_field):
                     patent_data[date_field] = datetime.fromisoformat(patent_data[date_field])
             patents.append(Patent(**patent_data))
-        
-        website_data = []
-        for site_data in data.get("website_data", []):
-            if site_data.get("last_crawled"):
-                site_data["last_crawled"] = datetime.fromisoformat(site_data["last_crawled"])
-            website_data.append(WebsiteData(**site_data))
-        
+
+        website_data = [WebsiteData.from_dict(site_data)
+                        for site_data in data.get("website_data", [])]
+
+        case_studies = [CaseStudy.from_dict(case)
+                        for case in data.get("case_studies", [])]
+
+        pricing_tiers = [PricingTier.from_dict(tier)
+                         for tier in data.get("pricing_tiers", [])]
+
         return cls(
             name=data["name"],
             website=data["website"],
@@ -476,7 +678,8 @@ class CompetitorProfile:
             social_presence=social_presence,
             github_activity=github_activity,
             recent_news=recent_news,
-            case_studies=data.get("case_studies", []),
+            case_studies=case_studies,
+            pricing_tiers=pricing_tiers,
             patents=patents,
             website_data=website_data,
             last_analyzed=last_analyzed,

@@ -13,7 +13,6 @@ from typing import List, Optional
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from competitor.analyzer import CompetitorAnalyzer, run_competitor_analysis
 from competitor.config import CompetitorConfig
 
 def setup_logging(verbose: bool = False, debug: bool = False):
@@ -237,6 +236,8 @@ def list_competitors(config_path: str) -> None:
 async def run_analysis(args) -> None:
     """Run the competitor analysis"""
     try:
+        from competitor.analyzer import CompetitorAnalyzer
+
         # Setup analyzer
         analyzer = CompetitorAnalyzer(args.config)
         

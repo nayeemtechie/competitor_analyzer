@@ -5,7 +5,6 @@ Handles YAML configuration loading, validation, and environment variable integra
 """
 
 import os
-import yaml
 from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,10 +12,12 @@ import logging
 from datetime import datetime
 from copy import deepcopy
 
-try:  # pragma: no cover - import fallback for alternative YAML implementations
-    from yaml import YAMLError
-except ImportError:  # pragma: no cover
-    YAMLError = Exception
+try:  # pragma: no cover - prefer PyYAML when available
+    import yaml  # type: ignore
+    from yaml import YAMLError  # type: ignore
+except (ModuleNotFoundError, ImportError):  # pragma: no cover - lightweight fallback
+    from competitor.utils import simple_yaml as yaml  # type: ignore
+    from competitor.utils.simple_yaml import YAMLError
 
 logger = logging.getLogger(__name__)
 

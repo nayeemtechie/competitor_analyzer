@@ -43,7 +43,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
-import aiofiles
+
 import aiohttp
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from bs4 import BeautifulSoup
@@ -210,13 +210,16 @@ class CacheManager:
             return None
 
         try:
-            async with aiofiles.open(path, "r", encoding="utf-8") as fh:
-                payload = json.loads(await fh.read())
+
+            raw_payload = await asyncio.to_thread(path.read_text, encoding="utf-8")
+            payload = json.loads(raw_payload)
 
             scraped_at = datetime.fromisoformat(payload.get("scraped_at"))
             if datetime.utcnow() - scraped_at > self.ttl:
                 # Expired cache entry
-                path.unlink(missing_ok=True)
+
+                await asyncio.to_thread(path.unlink, missing_ok=True)
+
                 return None
 
             return ScrapingResult.from_dict(payload)
@@ -227,25 +230,29 @@ class CacheManager:
     async def set(self, url: str, result: ScrapingResult) -> None:
         path = self._path_for(url)
         try:
-            async with aiofiles.open(path, "w", encoding="utf-8") as fh:
-                await fh.write(json.dumps(result.to_dict(), indent=2))
+
+            payload = json.dumps(result.to_dict(), indent=2)
+            await asyncio.to_thread(path.write_text, payload, encoding="utf-8")
+
         except Exception as exc:  # pragma: no cover - defensive guard
             logger.debug("Failed to write cache for %s: %s", url, exc)
 
     async def clear_expired(self) -> None:
         for item in self.cache_dir.glob("*.json"):
             try:
-                async with aiofiles.open(item, "r", encoding="utf-8") as fh:
-                    payload = json.loads(await fh.read())
+
+                raw_payload = await asyncio.to_thread(item.read_text, encoding="utf-8")
+                payload = json.loads(raw_payload)
                 scraped_at = datetime.fromisoformat(payload.get("scraped_at"))
                 if datetime.utcnow() - scraped_at > self.ttl:
-                    item.unlink(missing_ok=True)
+                    await asyncio.to_thread(item.unlink, missing_ok=True)
             except Exception:  # pragma: no cover - defensive guard
-                item.unlink(missing_ok=True)
+                await asyncio.to_thread(item.unlink, missing_ok=True)
 
     async def clear_all(self) -> None:
         for item in self.cache_dir.glob("*.json"):
-            item.unlink(missing_ok=True)
+            await asyncio.to_thread(item.unlink, missing_ok=True)
+
 
 
 class RobotsChecker:
@@ -687,6 +694,7 @@ class WebScraper:
             **self.stats,
             "cache_hit_rate": self.stats["cache_hits"] / requests * 100,
             "error_rate": self.stats["errors"] / requests * 100,
+
         }
 
 
@@ -797,6 +805,7 @@ class CompetitorScraper:
             "analytics": ["analytics", "insights", "metrics"],
             "ecommerce": ["commerce", "retail", "shop"],
         }
+
 
         for page in pages.values():
             snippet = (page.get("content_snippet") or "").lower()

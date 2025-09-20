@@ -139,8 +139,8 @@ class DOCXReportGenerator:
         doc.add_paragraph(f'Generated: {datetime.now().strftime("%B %d, %Y")}')
         doc.add_paragraph(f'Competitors Analyzed: {len(intelligence.profiles)}')
         
-        if intelligence.config:
-            doc.add_paragraph(f'Analysis Depth: {intelligence.config.depth_level.value.title()}')
+        if intelligence.analysis_config:
+            doc.add_paragraph(f'Analysis Depth: {intelligence.analysis_config.depth_level.value.title()}')
         
         # Competitor list
         doc.add_paragraph()
@@ -407,18 +407,18 @@ class DOCXReportGenerator:
         
         # Analysis configuration
         doc.add_heading('Analysis Configuration', level=2)
-        if intelligence.config:
+        if intelligence.analysis_config:
             config_table = doc.add_table(rows=5, cols=2)
             config_table.style = 'Light List Accent 1'
-            
+
             config_table.cell(0, 0).text = 'Analysis Depth'
-            config_table.cell(0, 1).text = intelligence.config.depth_level.value.title()
-            
+            config_table.cell(0, 1).text = intelligence.analysis_config.depth_level.value.title()
+
             config_table.cell(1, 0).text = 'Competitors'
-            config_table.cell(1, 1).text = ', '.join(intelligence.config.competitors)
-            
+            config_table.cell(1, 1).text = ', '.join(intelligence.analysis_config.competitors)
+
             config_table.cell(2, 0).text = 'Output Formats'
-            config_table.cell(2, 1).text = ', '.join(intelligence.config.output_formats)
+            config_table.cell(2, 1).text = ', '.join(intelligence.analysis_config.output_formats)
             
             config_table.cell(3, 0).text = 'Analysis Date'
             config_table.cell(3, 1).text = intelligence.analysis_date

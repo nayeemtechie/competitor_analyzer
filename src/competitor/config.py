@@ -476,24 +476,41 @@ class CompetitorConfig:
     def is_data_source_enabled(self, source_name: str) -> bool:
         """
         Check if a data source is enabled.
-        
+
         Args:
             source_name: Name of the data source to check
-            
+
         Returns:
             True if enabled, False otherwise
         """
-        source_mapping = {
-            "websites": self.data_sources.company_websites,
-            "funding": self.data_sources.funding_data,
-            "jobs": self.data_sources.job_boards,
-            "news": self.data_sources.news_sources,
-            "social": self.data_sources.social_media,
-            "github": self.data_sources.github_repos,
-            "patents": self.data_sources.patent_databases
+        if not isinstance(source_name, str):  # Defensive guard for unexpected input
+            return False
+
+        normalized_name = source_name.strip().lower().replace("-", "_").replace(" ", "_")
+
+        alias_mapping = {
+            "websites": "company_websites",
+            "company_websites": "company_websites",
+            "funding": "funding_data",
+            "funding_data": "funding_data",
+            "jobs": "job_boards",
+            "job_boards": "job_boards",
+            "news": "news_sources",
+            "news_sources": "news_sources",
+            "social": "social_media",
+            "social_media": "social_media",
+            "github": "github_repos",
+            "github_repos": "github_repos",
+            "patents": "patent_databases",
+            "patent_databases": "patent_databases"
         }
 
-        value = source_mapping.get(source_name)
+        canonical_name = alias_mapping.get(normalized_name, normalized_name)
+
+        if not hasattr(self.data_sources, canonical_name):
+            return False
+
+        value = getattr(self.data_sources, canonical_name)
 
         if isinstance(value, dict):
             return bool(value.get("enabled", False))

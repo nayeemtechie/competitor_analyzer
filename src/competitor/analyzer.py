@@ -546,11 +546,23 @@ async def run_competitor_analysis(
     try:
         analyzer = CompetitorAnalyzer(config_path)
         
-        # Override configuration if needed
+        # Override configuration if needed using the public API
         if output_dir:
-            analyzer.config._config_data['output']['output_dir'] = output_dir
+            resolved_output_dir = str(output_dir)
+            analyzer.config.output.output_dir = resolved_output_dir
+
+            # Ensure downstream components honour the new directory
+            analyzer.report_generator.output_dir = Path(resolved_output_dir)
+            analyzer.report_generator.output_dir.mkdir(parents=True, exist_ok=True)
+
         if formats:
-            analyzer.config._config_data['output']['formats'] = formats
+            if isinstance(formats, str):
+                parsed_formats = [fmt.strip() for fmt in formats.split(',') if fmt.strip()]
+            else:
+                parsed_formats = list(formats)
+
+            if parsed_formats:
+                analyzer.config.output.formats = parsed_formats
         
         # Run analysis
         intelligence = await analyzer.analyze_all_competitors(competitor_names)

@@ -282,26 +282,37 @@ class JobPosting:
 @dataclass
 class SocialMediaPresence:
     """Social media presence information."""
+
     platform: str
+    handle: Optional[str] = None
     url: Optional[str] = None
     followers: Optional[int] = None
     following: Optional[int] = None
     posts: Optional[int] = None
+    activity_level: Optional[str] = None
     engagement_rate: Optional[float] = None
     last_post_date: Optional[datetime] = None
     verified: bool = False
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "platform": self.platform,
+            "handle": self.handle,
             "url": self.url,
             "followers": self.followers,
             "following": self.following,
             "posts": self.posts,
+            "activity_level": self.activity_level,
             "engagement_rate": self.engagement_rate,
             "last_post_date": self.last_post_date.isoformat() if self.last_post_date else None,
             "verified": self.verified
         }
+
+
+class SocialPresence(SocialMediaPresence):
+    """Backward compatible alias for :class:`SocialMediaPresence`."""
+
+    pass
 
 
 @dataclass

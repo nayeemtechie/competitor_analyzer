@@ -165,8 +165,11 @@ class PDFReportGenerator:
         content.append(Paragraph(f"<b>Generated:</b> {analysis_date}", normal_style))
         content.append(Paragraph(f"<b>Competitors Analyzed:</b> {len(intelligence.profiles)}", normal_style))
         
-        if intelligence.config:
-            content.append(Paragraph(f"<b>Analysis Depth:</b> {intelligence.config.depth_level.value.title()}", normal_style))
+        if intelligence.analysis_config:
+            content.append(Paragraph(
+                f"<b>Analysis Depth:</b> {intelligence.analysis_config.depth_level.value.title()}",
+                normal_style
+            ))
         
         content.append(Spacer(1, 0.3*inch))
         
@@ -492,12 +495,12 @@ class PDFReportGenerator:
         
         # Analysis configuration
         content.append(Paragraph("Analysis Configuration", subheading_style))
-        if intelligence.config:
+        if intelligence.analysis_config:
             config_data = [
                 ['Parameter', 'Value'],
-                ['Analysis Depth', intelligence.config.depth_level.value.title()],
-                ['Competitors Analyzed', ', '.join(intelligence.config.competitors)],
-                ['Output Formats', ', '.join(intelligence.config.output_formats)],
+                ['Analysis Depth', intelligence.analysis_config.depth_level.value.title()],
+                ['Competitors Analyzed', ', '.join(intelligence.analysis_config.competitors)],
+                ['Output Formats', ', '.join(intelligence.analysis_config.output_formats)],
                 ['Analysis Date', intelligence.analysis_date]
             ]
             

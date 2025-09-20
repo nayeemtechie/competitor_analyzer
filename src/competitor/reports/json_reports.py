@@ -39,7 +39,7 @@ class JSONReportGenerator:
                 'generated_at': datetime.now().isoformat(),
                 'generator_version': '1.0',
                 'total_competitors': len(intelligence.profiles),
-                'analysis_config': self._serialize_config(intelligence.config) if intelligence.config else {},
+                'analysis_config': self._serialize_config(intelligence.analysis_config) if intelligence.analysis_config else {},
                 'data_sources_used': intelligence.metadata.get('data_sources_used', []),
                 'llm_models_used': intelligence.metadata.get('llm_models_used', {})
             },
@@ -115,27 +115,27 @@ class JSONReportGenerator:
         else:
             return data
     
-    def _serialize_config(self, config) -> Dict[str, Any]:
+    def _serialize_config(self, analysis_config) -> Dict[str, Any]:
         """Serialize analysis configuration"""
-        if not config:
+        if not analysis_config:
             return {}
-        
+
         try:
-            config_dict = asdict(config)
+            config_dict = asdict(analysis_config)
             return config_dict
         except:
             # Fallback for non-dataclass config
             return {
-                'depth_level': getattr(config, 'depth_level', 'standard'),
-                'competitors': getattr(config, 'competitors', []),
-                'output_formats': getattr(config, 'output_formats', []),
+                'depth_level': getattr(analysis_config, 'depth_level', 'standard'),
+                'competitors': getattr(analysis_config, 'competitors', []),
+                'output_formats': getattr(analysis_config, 'output_formats', []),
                 'data_sources': {
-                    'analyze_website': getattr(config, 'analyze_website', True),
-                    'analyze_funding': getattr(config, 'analyze_funding', True),
-                    'analyze_jobs': getattr(config, 'analyze_jobs', True),
-                    'analyze_news': getattr(config, 'analyze_news', True),
-                    'analyze_social': getattr(config, 'analyze_social', True),
-                    'analyze_github': getattr(config, 'analyze_github', True)
+                    'analyze_website': getattr(analysis_config, 'analyze_website', True),
+                    'analyze_funding': getattr(analysis_config, 'analyze_funding', True),
+                    'analyze_jobs': getattr(analysis_config, 'analyze_jobs', True),
+                    'analyze_news': getattr(analysis_config, 'analyze_news', True),
+                    'analyze_social': getattr(analysis_config, 'analyze_social', True),
+                    'analyze_github': getattr(analysis_config, 'analyze_github', True)
                 }
             }
     

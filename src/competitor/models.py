@@ -4,12 +4,16 @@ Core data models and schemas for the competitor analysis system.
 Defines the structure for competitor profiles, analysis results, and reports.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Union
+from dataclasses import dataclass, field, asdict
+from typing import Dict, List, Optional, Any, Union, TYPE_CHECKING
 from datetime import datetime
 from enum import Enum
 import json
 from pathlib import Path
+
+
+if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
+    from .config import AnalysisConfigSummary
 
 
 class ThreatLevel(Enum):
@@ -559,26 +563,62 @@ class CompetitorIntelligence:
     generated_at: datetime = field(default_factory=datetime.now)
     analysis_depth: str = "standard"
     total_competitors: int = 0
-    
+
     # Core Data
     competitor_profiles: List[CompetitorProfile] = field(default_factory=list)
     competitive_matrix: Optional[CompetitiveMatrix] = None
     market_intelligence: Optional[MarketIntelligence] = None
-    
+
+    # Configuration & Metadata
+    analysis_config: Optional['AnalysisConfigSummary'] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
     # Analysis Results
     executive_summary: Optional[str] = None
     key_insights: List[str] = field(default_factory=list)
     strategic_recommendations: List[str] = field(default_factory=list)
     threat_assessment: Dict[str, ThreatLevel] = field(default_factory=dict)
-    
+
     # SWOT Analyses
     overall_swot: Optional[SWOTAnalysis] = None
     competitor_swots: Dict[str, SWOTAnalysis] = field(default_factory=dict)
-    
+
+    def __post_init__(self):
+        """Normalise optional fields and keep derived counts synchronised."""
+        if self.competitor_profiles is None:
+            self.competitor_profiles = []
+
+        if self.metadata is None:
+            self.metadata = {}
+
+        self._synchronise_profile_state()
+
+    # ------------------------------------------------------------------
+    # Compatibility helpers
+    # ------------------------------------------------------------------
+    @property
+    def profiles(self) -> List[CompetitorProfile]:
+        """Alias for ``competitor_profiles`` used by existing callers."""
+        return self.competitor_profiles
+
+    @profiles.setter
+    def profiles(self, value: Optional[List[CompetitorProfile]]) -> None:
+        self.competitor_profiles = list(value) if value else []
+        self._synchronise_profile_state()
+
+    @property
+    def config(self) -> Optional['AnalysisConfigSummary']:
+        """Backward-compatible alias for :attr:`analysis_config`."""
+        return self.analysis_config
+
+    @config.setter
+    def config(self, value: Optional['AnalysisConfigSummary']) -> None:
+        self.analysis_config = value
+
     def add_competitor_profile(self, profile: CompetitorProfile):
         """Add a competitor profile to the intelligence."""
         self.competitor_profiles.append(profile)
-        self.total_competitors = len(self.competitor_profiles)
+        self._synchronise_profile_state()
         self.threat_assessment[profile.name] = profile.competitive_threat
     
     def get_competitor_by_name(self, name: str) -> Optional[CompetitorProfile]:
@@ -602,6 +642,8 @@ class CompetitorIntelligence:
             "competitor_profiles": [profile.to_dict() for profile in self.competitor_profiles],
             "competitive_matrix": self.competitive_matrix.to_dict() if self.competitive_matrix else None,
             "market_intelligence": self.market_intelligence.to_dict() if self.market_intelligence else None,
+            "analysis_config": self._serialize_analysis_config(),
+            "metadata": dict(self.metadata),
             "executive_summary": self.executive_summary,
             "key_insights": self.key_insights,
             "strategic_recommendations": self.strategic_recommendations,
@@ -662,14 +704,18 @@ class CompetitorIntelligence:
             name: SWOTAnalysis(**swot_data)
             for name, swot_data in data.get("competitor_swots", {}).items()
         }
-        
+
+        analysis_config = cls._deserialize_analysis_config(data.get("analysis_config"))
+        metadata = data.get("metadata") or {}
+
         return cls(
             generated_at=generated_at,
             analysis_depth=data.get("analysis_depth", "standard"),
-            total_competitors=data.get("total_competitors", 0),
             competitor_profiles=competitor_profiles,
             competitive_matrix=competitive_matrix,
             market_intelligence=market_intelligence,
+            analysis_config=analysis_config,
+            metadata=metadata,
             executive_summary=data.get("executive_summary"),
             key_insights=data.get("key_insights", []),
             strategic_recommendations=data.get("strategic_recommendations", []),
@@ -677,6 +723,70 @@ class CompetitorIntelligence:
             overall_swot=overall_swot,
             competitor_swots=competitor_swots
         )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _synchronise_profile_state(self) -> None:
+        """Ensure derived metadata stays aligned with profile data."""
+        self.total_competitors = len(self.competitor_profiles)
+
+        updated_assessment: Dict[str, ThreatLevel] = {}
+        for profile in self.competitor_profiles:
+            existing_level = self.threat_assessment.get(profile.name)
+            if isinstance(existing_level, ThreatLevel):
+                updated_assessment[profile.name] = existing_level
+            elif isinstance(existing_level, str):
+                try:
+                    updated_assessment[profile.name] = ThreatLevel(existing_level)
+                except ValueError:
+                    updated_assessment[profile.name] = profile.competitive_threat
+            else:
+                updated_assessment[profile.name] = profile.competitive_threat
+
+        self.threat_assessment = updated_assessment
+
+    def _serialize_analysis_config(self) -> Optional[Dict[str, Any]]:
+        """Return a serialisable representation of the analysis config."""
+        if not self.analysis_config:
+            return None
+
+        config_obj = self.analysis_config
+
+        if isinstance(config_obj, dict):
+            return dict(config_obj)
+
+        if hasattr(config_obj, "to_dict"):
+            return config_obj.to_dict()  # type: ignore[no-any-return]
+
+        if hasattr(config_obj, "__dataclass_fields__"):
+            return asdict(config_obj)
+
+        # Best-effort conversion
+        return dict(config_obj)  # type: ignore[arg-type]
+
+    @classmethod
+    def _deserialize_analysis_config(cls, raw_config: Optional[Dict[str, Any]]) -> Optional['AnalysisConfigSummary']:
+        """Reconstruct the analysis configuration object when possible."""
+        if not raw_config:
+            return None
+
+        if not isinstance(raw_config, dict):
+            return raw_config  # type: ignore[return-value]
+
+        try:
+            from .config import AnalysisConfigSummary, _DepthLevel  # Local import avoids circular deps
+
+            return AnalysisConfigSummary(
+                depth_level=_DepthLevel(raw_config.get("depth_level", "standard")),
+                competitors=raw_config.get("competitors", []),
+                output_formats=raw_config.get("output_formats", []),
+                target_pages=raw_config.get("target_pages", []),
+                data_sources=raw_config.get("data_sources", {}),
+            )
+        except Exception:
+            # Fall back to returning the raw dictionary if reconstruction fails
+            return raw_config  # type: ignore[return-value]
 
 
 # Utility functions for data validation and processing

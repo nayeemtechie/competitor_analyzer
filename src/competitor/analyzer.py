@@ -86,8 +86,8 @@ class CompetitorAnalyzer:
         
         # Create intelligence container
         intelligence = CompetitorIntelligence(
-            profiles=profiles,
-            config=self.config.get_analysis_config_object(),
+            competitor_profiles=profiles,
+            analysis_config=self.config.get_analysis_config_object(),
             metadata={
                 'total_competitors_analyzed': len(profiles),
                 'analysis_duration_minutes': round(analysis_duration, 2),

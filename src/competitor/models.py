@@ -496,6 +496,7 @@ class WebsiteData:
     case_studies: List[CaseStudy] = field(default_factory=list)
     technology_stack: List[str] = field(default_factory=list)
     content_themes: List[str] = field(default_factory=list)
+    recommendation_placements: List[Dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.meta_keywords = _ensure_list(self.meta_keywords)
@@ -503,6 +504,11 @@ class WebsiteData:
         self.pages_analyzed = _ensure_list(self.pages_analyzed)
         self.technology_stack = _ensure_list(self.technology_stack)
         self.content_themes = _ensure_list(self.content_themes)
+        self.recommendation_placements = [
+            dict(placement)
+            for placement in _ensure_list(self.recommendation_placements)
+            if isinstance(placement, dict)
+        ]
         self.pricing_tiers = [PricingTier.from_dict(tier) for tier in _ensure_list(self.pricing_tiers)]
         self.case_studies = [CaseStudy.from_dict(case) for case in _ensure_list(self.case_studies)]
         self.key_pages = dict(self.key_pages or {})
@@ -556,6 +562,9 @@ class WebsiteData:
             "case_studies": [case.to_dict() for case in self.case_studies],
             "technology_stack": list(self.technology_stack),
             "content_themes": list(self.content_themes),
+            "recommendation_placements": [
+                dict(placement) for placement in self.recommendation_placements
+            ],
         }
 
     @classmethod

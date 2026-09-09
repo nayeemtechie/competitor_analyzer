@@ -48,11 +48,6 @@ import aiohttp
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from bs4 import BeautifulSoup
 
-from .recommendation_placements import (
-    RecommendationPlacement,
-    RecommendationPlacementDetector,
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -83,7 +78,6 @@ class ScrapingResult:
     scraped_at: datetime = field(default_factory=datetime.utcnow)
     page_type: Optional[str] = None
     word_count: Optional[int] = None
-    recommendation_placements: List[RecommendationPlacement] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize the result for caching/JSON output."""
@@ -107,9 +101,6 @@ class ScrapingResult:
             "scraped_at": self.scraped_at.isoformat(),
             "page_type": self.page_type,
             "word_count": self.word_count,
-            "recommendation_placements": [
-                placement.to_dict() for placement in self.recommendation_placements
-            ],
         }
 
     @classmethod
@@ -119,13 +110,6 @@ class ScrapingResult:
         kwargs = dict(data)
         if "scraped_at" in kwargs and isinstance(kwargs["scraped_at"], str):
             kwargs["scraped_at"] = datetime.fromisoformat(kwargs["scraped_at"])
-        kwargs["recommendation_placements"] = [
-            placement
-            if isinstance(placement, RecommendationPlacement)
-            else RecommendationPlacement.from_dict(placement)
-            for placement in (kwargs.get("recommendation_placements") or [])
-            if isinstance(placement, (RecommendationPlacement, dict))
-        ]
         return cls(**kwargs)
 
 
@@ -143,7 +127,6 @@ class WebsiteScrapeSummary:
     case_studies: List[Dict[str, Any]] = field(default_factory=list)
     raw_pages: List[ScrapingResult] = field(default_factory=list)
     stats: Dict[str, Any] = field(default_factory=dict)
-    recommendation_placements: List[RecommendationPlacement] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a JSON serialisable representation."""
@@ -159,9 +142,6 @@ class WebsiteScrapeSummary:
             "case_studies": self.case_studies,
             "stats": self.stats,
             "raw_pages": [page.to_dict() for page in self.raw_pages],
-            "recommendation_placements": [
-                placement.to_dict() for placement in self.recommendation_placements
-            ],
         }
 
 
@@ -356,7 +336,6 @@ class ContentExtractor:
 
     def __init__(self) -> None:
         self._tech_detector = TechnologyDetector()
-        self._recommendation_detector = RecommendationPlacementDetector()
 
     def extract(self, html: str, url: str, headers: Dict[str, str]) -> ScrapingResult:
         soup = BeautifulSoup(html, "html.parser")
@@ -373,9 +352,6 @@ class ContentExtractor:
         result.stylesheets = self._extract_stylesheets(soup, url)
         result.technologies = self._tech_detector.detect(html, headers)
         result.page_type = self._determine_page_type(url, result.title, result.content)
-        result.recommendation_placements = self._recommendation_detector.detect(
-            soup, page_url=url, page_type=result.page_type
-        )
         result.success = True
         return result
 
@@ -774,7 +750,6 @@ class CompetitorScraper:
             if result.success:
                 summary.pages_analyzed.append(page_name)
             technologies.update(result.technologies)
-            summary.recommendation_placements.extend(result.recommendation_placements)
 
         summary.key_pages = page_map
         summary.technology_stack = sorted(technologies)
@@ -808,9 +783,6 @@ class CompetitorScraper:
             summary["content_snippet"] = result.content[:800]
         if result.page_type:
             summary["page_type"] = result.page_type
-        summary["recommendation_placements"] = [
-            placement.to_dict() for placement in result.recommendation_placements
-        ]
         return summary
 
     def _extract_case_studies(self, pages: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -878,8 +850,6 @@ def clean_text(text: str) -> str:
 
 
 __all__ = [
-    "RecommendationPlacement",
-    "RecommendationPlacementDetector",
     "ScrapingResult",
     "WebsiteScrapeSummary",
     "RateLimiter",

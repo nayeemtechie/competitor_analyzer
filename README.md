@@ -489,29 +489,6 @@ class LLMProvider:
     async def achat(self, system: str, user: str, model: str = "gpt-4o", **kwargs) -> str
 ```
 
-### Evidence-bounded recommendation analysis
-
-`RecommendationAnalysisLayer` accepts crawler output plus optional audit-engine
-output. It normalizes those inputs into evidence records and rejects generated
-analysis that cites unknown evidence or makes unqualified claims about site
-capabilities.
-
-```python
-from src.llm.evidence_analysis import RecommendationAnalysisLayer
-
-layer = RecommendationAnalysisLayer.openai(model="gpt-4o-mini")
-analysis = await layer.analyze(
-    crawler_output=scraping_result,
-    audit_output=audit_result,
-)
-print(analysis.to_dict())
-```
-
-The OpenAI implementation uses strict structured output, sends no tools, sets
-response storage to false, and reads `OPENAI_API_KEY` only at runtime. API keys
-are never included in configuration or analysis output, and provider instances
-cannot be serialized.
-
 # File: docs/configuration.md
 
 # Configuration Guide

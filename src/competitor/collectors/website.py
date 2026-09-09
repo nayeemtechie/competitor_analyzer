@@ -11,7 +11,6 @@ import logging
 
 from .base import CachedCollector, RateLimitedSession
 from ..models import WebsiteData, PricingTier, CaseStudy
-from ..recommendation_placements import RecommendationPlacementDetector
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,6 @@ class WebsiteCollector(CachedCollector):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config, "website")
         self.user_agent = config.get('user_agent', 'CompetitorAnalysis Bot 1.0')
-        self.recommendation_detector = RecommendationPlacementDetector()
         
     async def _collect_data(self, competitor_name: str, website: str, target_pages: List[Dict] = None) -> WebsiteData:
         """Collect website data"""
@@ -45,9 +43,6 @@ class WebsiteCollector(CachedCollector):
                         page_data = await self._analyze_page(soup, page_info, url)
                         website_data.key_pages[page_info['name']] = page_data
                         website_data.pages_analyzed.append(url)
-                        website_data.recommendation_placements.extend(
-                            page_data.get('recommendation_placements', [])
-                        )
                         
                         # Extract page-specific data
                         if page_info['name'] == 'pricing':
@@ -82,9 +77,6 @@ class WebsiteCollector(CachedCollector):
     
     async def _analyze_page(self, soup: BeautifulSoup, page_info: Dict, url: str) -> Dict[str, Any]:
         """Analyze individual page content"""
-        placements = self.recommendation_detector.detect(
-            soup, page_url=url, page_type=page_info.get('name')
-        )
         return {
             'url': url,
             'title': soup.title.string if soup.title else '',
@@ -95,8 +87,7 @@ class WebsiteCollector(CachedCollector):
             'forms_count': len(soup.find_all('form')),
             'images_count': len(soup.find_all('img')),
             'external_links': len([a for a in soup.find_all('a', href=True) 
-                                 if self._is_external_link(a['href'], url)]),
-            'recommendation_placements': [placement.to_dict() for placement in placements],
+                                 if self._is_external_link(a['href'], url)])
         }
     
     def _get_meta_description(self, soup: BeautifulSoup) -> str:
